@@ -45,10 +45,10 @@ class CameraSimulator:
         return self.simulator.get_camera_view()
 
     def find_marker(self):
-        """Returns if a marker is found and its center in the current frame."""
+        """Returns if a marker is found, its center, and its shape type."""
         frame = self.get_frame()
         if frame is None or frame.size == 0:
-            return False, None
+            return False, None, None
         return self.recognizer.find_marker(frame)
 
     def move_laser_to_marker(self, marker_center_px):

@@ -50,8 +50,9 @@ class Application:
             # If TestPrint.png exists, place it too (centered between markers)
             sample_mid_x, sample_mid_y = (m1_x + m2_x) / 2, (m1_y + m2_y) / 2
             if os.path.exists("TestPrint.png"):
-                self.camera.simulator.place_sample("TestPrint.png", sample_mid_x, sample_mid_y, rotate_deg=rotate_deg)
-                print(f"Placed TestPrint.png at ({sample_mid_x}, {sample_mid_y}) with {rotate_deg:.2f} deg")
+                # Pass scale=0.5 to make it smaller as a sample
+                self.camera.simulator.place_sample("TestPrint.png", sample_mid_x, sample_mid_y, rotate_deg=rotate_deg, scale=0.5)
+                print(f"Placed TestPrint.png at ({sample_mid_x}, {sample_mid_y}) with scale 0.5 and {rotate_deg:.2f} deg")
             
             print(f"Placed markers with sample rotation: {rotate_deg:.2f} deg")
         else:

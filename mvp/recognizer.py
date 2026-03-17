@@ -38,6 +38,7 @@ class MarkerRecognizer:
             approx = cv2.approxPolyDP(contour, 0.04 * peri, True)
             
             is_candidate = False
+            shape_type = None
             # Check if it's a square
             if len(approx) == 4:
                 # Use minAreaRect for rotated squares
@@ -47,12 +48,14 @@ class MarkerRecognizer:
                     ar = w / float(h)
                     if 0.7 <= ar <= 1.4: # Lenient for rotated squares on noisy background
                         is_candidate = True
+                        shape_type = 'square'
             
             # Check if it's a circle using circularity
             if not is_candidate and peri > 0:
                 circularity = 4 * np.pi * area / (peri * peri)
                 if circularity > 0.8: # Lenient
                     is_candidate = True
+                    shape_type = 'circle'
 
             if is_candidate:
                 child_idx = hierarchy[0][i][2]
@@ -86,9 +89,9 @@ class MarkerRecognizer:
                     child_idx = hierarchy[0][child_idx][0]
                 
                 if valid_internal:
-                    return True, (cX_p, cY_p)
+                    return True, (cX_p, cY_p), shape_type
 
-        return False, None
+        return False, None, None
 
     def _is_valid_internal(self, contour, cX_p, cY_p, marker_size):
         M_c = cv2.moments(contour)

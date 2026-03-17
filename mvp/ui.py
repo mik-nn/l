@@ -19,6 +19,8 @@ class App(tk.Tk):
         tk.Tk.__init__(self, *args, **kwargs)
         self.title("LaserCam MVP")
         self.camera = camera if camera else Camera()
+        self.state = 'IDLE'
+        self.detected_marker = None
         
         # Main layout
         self.main_frame = tk.Frame(self)
@@ -36,29 +38,50 @@ class App(tk.Tk):
         self.control_panel = tk.Frame(self)
         self.control_panel.pack()
         
-        from mvp.camera_simulator import CameraSimulator
-        if isinstance(self.camera, CameraSimulator):
-            self.add_simulator_controls()
+        self.add_controls()
 
         self.delay = 15
         self.update()
 
-    def add_simulator_controls(self):
+    def add_controls(self):
+        # Clear existing controls
+        if hasattr(self.control_panel, 'winfo_children'):
+            for child in self.control_panel.winfo_children():
+                child.destroy()
+            
         btn_frame = tk.Frame(self.control_panel)
         btn_frame.pack()
         
-        step = 5 # mm
+        step = 1 # mm
         
-        tk.Button(btn_frame, text="Up", command=lambda: self.move_sim(0, -step)).grid(row=0, column=1)
-        tk.Button(btn_frame, text="Left", command=lambda: self.move_sim(-step, 0)).grid(row=1, column=0)
-        tk.Button(btn_frame, text="Right", command=lambda: self.move_sim(step, 0)).grid(row=1, column=2)
-        tk.Button(btn_frame, text="Down", command=lambda: self.move_sim(0, step)).grid(row=2, column=1)
+        # Navigation
+        tk.Button(btn_frame, text="Up", command=lambda: self.move_gantry(0, -step)).grid(row=0, column=1)
+        tk.Button(btn_frame, text="Left", command=lambda: self.move_gantry(-step, 0)).grid(row=1, column=0)
+        tk.Button(btn_frame, text="Right", command=lambda: self.move_gantry(step, 0)).grid(row=1, column=2)
+        tk.Button(btn_frame, text="Down", command=lambda: self.move_gantry(0, step)).grid(row=2, column=1)
         
-    def move_sim(self, dx, dy):
+        # Fine-tune controls (only visible when marker is detected)
+        if self.state == 'FINE_TUNE':
+            tk.Button(btn_frame, text="Approve", command=self.approve_marker, bg="green", fg="white").grid(row=0, column=3, padx=10)
+            tk.Button(btn_frame, text="Cancel", command=self.cancel_marker, bg="red", fg="white").grid(row=1, column=3, padx=10)
+
+    def move_gantry(self, dx, dy):
         from mvp.camera_simulator import CameraSimulator
         if isinstance(self.camera, CameraSimulator):
             sim = self.camera.simulator
             sim.move_gantry_to(sim.gantry_x + dx, sim.gantry_y + dy)
+
+    def approve_marker(self):
+        print("Marker Approved")
+        self.state = 'IDLE'
+        self.detected_marker = None
+        self.add_controls()
+
+    def cancel_marker(self):
+        print("Marker Canceled")
+        self.state = 'IDLE'
+        self.detected_marker = None
+        self.add_controls()
 
     def update(self):
         # 1. Update FOV view
@@ -67,8 +90,39 @@ class App(tk.Tk):
             # Detect markers for visualization
             from mvp.camera_simulator import CameraSimulator
             if isinstance(self.camera, CameraSimulator):
-                found, center = self.camera.find_marker()
-                if found:
+                found, center, shape_type = self.camera.find_marker()
+                
+                if found and self.state == 'IDLE':
+                    self.state = 'FINE_TUNE'
+                    self.detected_marker = (center, shape_type)
+                    self.add_controls()
+                
+                if self.state == 'FINE_TUNE' and self.detected_marker:
+                    center, shape_type = self.detected_marker
+                    # Show zoomed view around the detected marker
+                    zoom_factor = 2.0
+                    h, w = frame.shape[:2]
+                    crop_size = 200 # px
+                    
+                    x, y = center
+                    x1, y1 = max(0, int(x - crop_size/2)), max(0, int(y - crop_size/2))
+                    x2, y2 = min(w, int(x + crop_size/2)), min(h, int(y + crop_size/2))
+                    
+                    zoom_frame = frame[y1:y2, x1:x2].copy()
+                    zoom_frame = cv2.resize(zoom_frame, (w, h), interpolation=cv2.INTER_LINEAR)
+                    
+                    # Draw aimed reticle
+                    cx, cy = w // 2, h // 2
+                    if shape_type == 'circle':
+                        cv2.circle(zoom_frame, (cx, cy), 50, (0, 255, 0), 2)
+                    else: # square
+                        cv2.rectangle(zoom_frame, (cx-50, cy-50), (cx+50, cy+50), (0, 255, 0), 2)
+                    
+                    cv2.line(zoom_frame, (cx-10, cy), (cx+10, cy), (0, 255, 0), 1)
+                    cv2.line(zoom_frame, (cx, cy-10), (cx, cy+10), (0, 255, 0), 1)
+                    
+                    frame = zoom_frame
+                elif found:
                     cv2.circle(frame, center, 10, (0, 255, 0), 2)
                     cv2.putText(frame, "Marker Found", (center[0]+15, center[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
@@ -94,8 +148,6 @@ class App(tk.Tk):
             self.overview_canvas.create_image(0, 0, image=self.overview_photo, anchor=tk.NW)
             
             # Draw camera FOV rectangle
-            # Map gantry coordinates to overview pixels
-            # work_area size
             wa_h, wa_w = work_area.shape[:2]
             scale_x = 400 / wa_w
             scale_y = 400 / wa_h

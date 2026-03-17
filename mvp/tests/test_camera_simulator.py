@@ -40,7 +40,7 @@ def test_camera_simulator_find_marker():
     # Inner feature (detached)
     cv2.rectangle(wa, (248, 248), (252, 252), (0, 0, 0), -1)
     
-    found, center = sim.find_marker()
+    found, center, shape = sim.find_marker()
     assert found
     # In FOV (250, 250) is the center
     assert abs(center[0] - 250) <= 2

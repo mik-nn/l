@@ -15,7 +15,7 @@ def test_find_marker_positive(recognizer):
     # Add an internal feature (the arrow)
     cv2.rectangle(img, (48, 48), (52, 52), (0, 0, 0), -1)
     
-    found, center = recognizer.find_marker(img)
+    found, center, shape = recognizer.find_marker(img)
     assert found
     assert abs(center[0] - 50) <= 1
     assert abs(center[1] - 50) <= 1
@@ -34,7 +34,7 @@ def test_find_marker_no_internal(recognizer):
     # Draw a hollow square but NO internal arrow
     cv2.rectangle(img, (40, 40), (60, 60), (0, 0, 0), 2)
     
-    found, center = recognizer.find_marker(img)
+    found, center, shape = recognizer.find_marker(img)
     # Should NOT be found because it lacks internal validation
     assert not found
 
@@ -46,7 +46,7 @@ def test_find_marker_circle(recognizer):
     # Add internal feature
     cv2.circle(img, (50, 50), 3, (0, 0, 0), -1)
     
-    found, center = recognizer.find_marker(img)
+    found, center, shape = recognizer.find_marker(img)
     assert found
     assert abs(center[0] - 50) <= 1
     assert abs(center[1] - 50) <= 1
@@ -59,7 +59,7 @@ def test_find_marker_hollow_with_arrow(recognizer):
     # Draw a small circle inside to simulate internal feature (arrow part)
     cv2.circle(img, (50, 50), 3, (0, 0, 0), -1)
     
-    found, center = recognizer.find_marker(img)
+    found, center, shape = recognizer.find_marker(img)
     assert found
     assert abs(center[0] - 50) <= 1
     assert abs(center[1] - 50) <= 1
