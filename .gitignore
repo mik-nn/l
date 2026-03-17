@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.zencoder/
+CLAUDE.md
+TestPrint.png
+test_*.png

@@ -1,76 +1,76 @@
 # mvp/app.py
-from .simulator import MotionSimulator
-from .recognizer import MarkerRecognizer
-from .bridge import get_bridge
 import cv2
+import os
+import sys
+
+# Add the project root to the Python path to support direct execution
+if __name__ == "__main__":
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+from mvp.camera_simulator import CameraSimulator
+from mvp.ui import App
+from mvp.bridge import get_bridge
 
 class Application:
-    def __init__(self):
-        self.simulator = MotionSimulator()
-        self.recognizer = MarkerRecognizer()
-        self.bridge = get_bridge()
-        self.state = "first_marker_search"
-        
-        # Place marker on work area for simulation
-        marker_img = cv2.imread("markers/marker.png", cv2.IMREAD_GRAYSCALE)
-        if marker_img is not None:
-            marker_h, marker_w = marker_img.shape
-            # Place two markers
-            self.marker1_pos_px = (200, 200)
-            self.marker2_pos_px = (600, 200)
-            self.simulator.work_area[self.marker1_pos_px[1]:self.marker1_pos_px[1]+marker_h, self.marker1_pos_px[0]:self.marker1_pos_px[0]+marker_w] = marker_img
-            self.simulator.work_area[self.marker2_pos_px[1]:self.marker2_pos_px[1]+marker_h, self.marker2_pos_px[0]:self.marker2_pos_px[0]+marker_w] = marker_img
-            print("Placed two markers on the simulated work area.")
+    def __init__(self, use_simulator=True):
+        if use_simulator:
+            self.camera = CameraSimulator("HoneyComb.jpg")
+            
+            import random
+            import math
+            rotate_deg = random.uniform(0, 360)
+            
+            # Marker 1 and 2 base positions relative to machine center (to land on mesh)
+            m1_base = (150, 200)
+            m2_base = (300, 350)
+            
+            # Rotate positions around a central anchor on the mesh
+            mid_x, mid_y = 220, 270
+            
+            def rotate_pos(pos, mid, angle_deg):
+                rad = math.radians(angle_deg)
+                dx, dy = pos[0] - mid[0], pos[1] - mid[1]
+                rx = mid[0] + dx * math.cos(rad) - dy * math.sin(rad)
+                ry = mid[1] + dx * math.sin(rad) + dy * math.cos(rad)
+                return rx, ry
+            
+            m1_x, m1_y = rotate_pos(m1_base, (mid_x, mid_y), rotate_deg)
+            m2_x, m2_y = rotate_pos(m2_base, (mid_x, mid_y), rotate_deg)
+            
+            # Target angles relative to machine X
+            angle12 = math.degrees(math.atan2(m2_y - m1_y, m2_x - m1_x))
+            angle21 = angle12 + 180
+            
+            # Place markers on the simulator
+            self.camera.add_marker(m1_x, m1_y, 'square', angle12, rotate_deg=rotate_deg)
+            self.camera.add_marker(m2_x, m2_y, 'circle', angle21, rotate_deg=rotate_deg)
+            
+            # If TestPrint.png exists, place it too (centered between markers)
+            sample_mid_x, sample_mid_y = (m1_x + m2_x) / 2, (m1_y + m2_y) / 2
+            if os.path.exists("TestPrint.png"):
+                self.camera.simulator.place_sample("TestPrint.png", sample_mid_x, sample_mid_y, rotate_deg=rotate_deg)
+                print(f"Placed TestPrint.png at ({sample_mid_x}, {sample_mid_y}) with {rotate_deg:.2f} deg")
+            
+            print(f"Placed markers with sample rotation: {rotate_deg:.2f} deg")
         else:
-            print("Could not load marker image for simulation.")
+            from mvp.camera import Camera
+            self.camera = Camera()
+
+        self.bridge = get_bridge()
+        self.ui = App(camera=self.camera)
+        
+        # Initial gantry position
+        if use_simulator:
+            self.camera.move_to(m1_x, m1_y) # Start exactly at the first marker
 
     def run(self):
-        print("Starting LaserCam MVP application.")
-        print("Move the gantry to find the first marker.")
-        
-        # Initial gantry position to see the first marker
-        self.simulator.move_gantry_to(
-            self.marker1_pos_px[0] / self.simulator.pixels_per_mm,
-            self.marker1_pos_px[1] / self.simulator.pixels_per_mm
-        )
-
-        while True:
-            camera_view = self.simulator.get_camera_view()
-            camera_view_bgr = cv2.cvtColor(camera_view, cv2.COLOR_GRAY2BGR)
-            
-            found, center = self.recognizer.find_marker(camera_view_bgr)
-
-            if self.state == "first_marker_search" and found:
-                print("First marker found. Press '1' to confirm.")
-                self.state = "first_marker_confirm"
-            
-            if self.state == "first_marker_confirm":
-                if self.bridge.check_for_hotkey():
-                    self.simulator.move_laser_to_marker_center(center)
-                    print("First marker confirmed. Move to the second marker.")
-                    self.state = "second_marker_search"
-                    # Move gantry to see the second marker
-                    self.simulator.move_gantry_to(
-                        self.marker2_pos_px[0] / self.simulator.pixels_per_mm,
-                        self.marker2_pos_px[1] / self.simulator.pixels_per_mm
-                    )
-
-            if self.state == "second_marker_search" and found:
-                print("Second marker found. Press '1' to confirm.")
-                self.state = "second_marker_confirm"
-
-            if self.state == "second_marker_confirm":
-                if self.bridge.check_for_hotkey():
-                    self.simulator.move_laser_to_marker_center(center)
-                    print("Second marker confirmed. Alignment complete.")
-                    break
-            
-            cv2.imshow("Simulator Camera View", camera_view_bgr)
-            if cv2.waitKey(100) & 0xFF == ord('q'):
-                break
-        
-        cv2.destroyAllWindows()
+        self.ui.mainloop()
 
 def main():
     app = Application()
     app.run()
+
+if __name__ == "__main__":
+    main()
