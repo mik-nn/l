@@ -12,4 +12,5 @@ mvp/__pycache__/
 .flake8
 *_diff.txt
 *.log
-*.json
+# Do NOT ignore lasercam.json - it's a config file that should be tracked
+# *.json

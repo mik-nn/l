@@ -23,6 +23,80 @@ _DISPLAY_W = 620
 _DISPLAY_H = 360
 
 
+class SimulatorWindow(tk.Toplevel):
+    """Separate window showing the simulator workspace view.
+    
+    This is only for MVP - in the final version, this will not exist.
+    """
+
+    def __init__(self, parent, simulator, controller, laser_offset_x=0.0, laser_offset_y=0.0):
+        super().__init__(parent)
+        self.title("Simulator View")
+        self.geometry("400x400")
+
+        self.simulator = simulator
+        self.controller = controller
+        self.laser_offset_x = laser_offset_x
+        self.laser_offset_y = laser_offset_y
+
+        self.canvas = tk.Canvas(self, width=400, height=400)
+        self.canvas.pack()
+
+    def update_view(self):
+        """Update the simulator workspace view."""
+        sim = self.simulator
+        work_area = sim.work_area
+
+        canvas_w = self.canvas.winfo_width()
+        canvas_h = self.canvas.winfo_height()
+        if canvas_w < 1:
+            canvas_w = 400
+        if canvas_h < 1:
+            canvas_h = 400
+
+        overview_img = cv2.resize(work_area, (canvas_w, canvas_h))
+        overview_rgb = cv2.cvtColor(overview_img, cv2.COLOR_BGR2RGB)
+        self.photo = ImageTk.PhotoImage(image=Image.fromarray(overview_rgb))
+
+        self.canvas.delete("all")
+        self.canvas.create_image(0, 0, image=self.photo, anchor=tk.NW)
+
+        wa_h, wa_w = work_area.shape[:2]
+        sx = canvas_w / wa_w
+        sy = canvas_h / wa_h
+
+        ctrl_x, ctrl_y = self.controller.position
+
+        cam_x_px = ctrl_x * sim.workspace_pixels_per_mm
+        cam_y_px = ctrl_y * sim.workspace_pixels_per_mm
+
+        self.canvas.create_oval(
+            cam_x_px * sx - 4, cam_y_px * sy - 4,
+            cam_x_px * sx + 4, cam_y_px * sy + 4,
+            fill="red", outline="white", width=2,
+        )
+
+        laser_x = ctrl_x + self.laser_offset_x
+        laser_y = ctrl_y + self.laser_offset_y
+        laser_x_px = laser_x * sim.workspace_pixels_per_mm
+        laser_y_px = laser_y * sim.workspace_pixels_per_mm
+        self.canvas.create_oval(
+            laser_x_px * sx - 4, laser_y_px * sy - 4,
+            laser_x_px * sx + 4, laser_y_px * sy + 4,
+            fill="blue", outline="white", width=2,
+        )
+
+        fov_w_px = int(sim.camera_fov_mm[0] * sim.workspace_pixels_per_mm)
+        fov_h_px = int(sim.camera_fov_mm[1] * sim.workspace_pixels_per_mm)
+        self.canvas.create_rectangle(
+            (cam_x_px - fov_w_px / 2) * sx,
+            (cam_y_px - fov_h_px / 2) * sy,
+            (cam_x_px + fov_w_px / 2) * sx,
+            (cam_y_px + fov_h_px / 2) * sy,
+            outline="yellow", width=2,
+        )
+
+
 class App(tk.Tk):
     NAV_MAX_STEPS = 20
 
@@ -101,13 +175,13 @@ class App(tk.Tk):
         self.main_frame = tk.Frame(self)
         self.main_frame.pack()
 
-        # Emulator workspace view (left)
-        self.emulator_canvas = tk.Canvas(self.main_frame, width=400, height=400)
-        self.emulator_canvas.pack(side=tk.LEFT)
+        # AICODE-NOTE: Simulator view moved to separate window for MVP
+        # In final version, this will not exist
+        self.simulator_window = None
 
-        # Camera view (right)
+        # Camera view only
         self.canvas = tk.Canvas(self.main_frame, width=_DISPLAY_W, height=_DISPLAY_H)
-        self.canvas.pack(side=tk.RIGHT)
+        self.canvas.pack()
 
         # Control panel
         self.control_panel = tk.Frame(self)
@@ -124,8 +198,6 @@ class App(tk.Tk):
         )
         self.controller_status_label.pack()
 
-        self._try_detect_controller()
-
         # Log label — shows recent actions
         self.log_var = tk.StringVar(value="Ready")
         self.log_label = tk.Label(
@@ -133,20 +205,32 @@ class App(tk.Tk):
         )
         self.log_label.pack(fill=tk.X, padx=10, pady=5)
 
-        # ── Menu bar ──────────────────────────────────────────────
+        # Menu bar
         menubar = tk.Menu(self)
         self.config(menu=menubar)
+
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Preferences", command=self._show_preferences)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.on_closing)
 
         # Tools menu
         tools_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Tools", menu=tools_menu)
-        tools_menu.add_command(label="Preferences", command=self._show_preferences)
         tools_menu.add_command(label="Calibrate Offset", command=self._show_calibration)
 
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="About", command=self._show_about)
+
+        self._try_detect_controller()
+
+        # AICODE-NOTE: Create separate simulator window for MVP
+        # In final version, this will not exist
+        self._create_simulator_window()
 
         self.add_controls()
 
@@ -226,6 +310,22 @@ class App(tk.Tk):
         self.controller_type = cfg.controller
         self._try_detect_controller()
         self.add_controls()
+
+    def _create_simulator_window(self):
+        """Create separate simulator window for MVP.
+        
+        In the final version, this window will not exist.
+        """
+        from mvp.camera_simulator import CameraSimulator
+
+        if isinstance(self.camera, CameraSimulator):
+            self.simulator_window = SimulatorWindow(
+                self,
+                self.camera.simulator,
+                self.controller,
+                self.laser_offset_x,
+                self.laser_offset_y,
+            )
 
     def _log(self, message):
         """Append a message to the visible log."""
@@ -1471,98 +1571,19 @@ class App(tk.Tk):
         else:
             self.canvas.itemconfig(self._camera_image_item, image=self.photo)
 
-        # Emulator workspace view — shows full workspace with laser/camera positions
+        # Update separate simulator window (MVP only)
         from mvp.camera_simulator import CameraSimulator
 
-        if isinstance(self.camera, CameraSimulator):
+        if isinstance(self.camera, CameraSimulator) and self.simulator_window:
             sim = self.camera.simulator
-            work_area = sim.work_area
 
-            # Draw workspace overview
-            canvas_w = self.emulator_canvas.winfo_width()
-            canvas_h = self.emulator_canvas.winfo_height()
-            if canvas_w < 1: canvas_w = 400
-            if canvas_h < 1: canvas_h = 400
-            
-            overview_img = cv2.resize(work_area, (canvas_w, canvas_h))
-            overview_rgb = cv2.cvtColor(overview_img, cv2.COLOR_BGR2RGB)
-            self.emulator_photo = ImageTk.PhotoImage(
-                image=Image.fromarray(overview_rgb)
-            )
-            
-            # Clear emulator canvas to prevent memory leak of drawn shapes
-            self.emulator_canvas.delete("all")
-            self.emulator_canvas.create_image(
-                0, 0, image=self.emulator_photo, anchor=tk.NW
-            )
-
-            wa_h, wa_w = work_area.shape[:2]
-            sx = canvas_w / wa_w
-            sy = canvas_h / wa_h
-
-            # AICODE-NOTE: Use actual controller position, not simulator's internal position
+            # Sync simulator position with controller
             ctrl_x, ctrl_y = self.controller.position
             sim.camera_x_mm = ctrl_x
             sim.camera_y_mm = ctrl_y
 
-            # Camera position (red dot)
-            cam_x_px = ctrl_x * sim.workspace_pixels_per_mm
-            cam_y_px = ctrl_y * sim.workspace_pixels_per_mm
-
-            self.emulator_canvas.create_oval(
-                cam_x_px * sx - 4, cam_y_px * sy - 4,
-                cam_x_px * sx + 4, cam_y_px * sy + 4,
-                fill="red", outline="white", width=2,
-            )
-
-            # Laser position (blue dot, offset from camera)
-            laser_x = ctrl_x + self.laser_offset_x
-            laser_y = ctrl_y + self.laser_offset_y
-            laser_x_px = laser_x * sim.workspace_pixels_per_mm
-            laser_y_px = laser_y * sim.workspace_pixels_per_mm
-            self.emulator_canvas.create_oval(
-                laser_x_px * sx - 4, laser_y_px * sy - 4,
-                laser_x_px * sx + 4, laser_y_px * sy + 4,
-                fill="blue", outline="white", width=2,
-            )
-
-            # FOV rectangle (yellow)
-            fov_w_px = int(sim.camera_fov_mm[0] * sim.workspace_pixels_per_mm)
-            fov_h_px = int(sim.camera_fov_mm[1] * sim.workspace_pixels_per_mm)
-            self.emulator_canvas.create_rectangle(
-                (cam_x_px - fov_w_px / 2) * sx,
-                (cam_y_px - fov_h_px / 2) * sy,
-                (cam_x_px + fov_w_px / 2) * sx,
-                (cam_y_px + fov_h_px / 2) * sy,
-                outline="yellow", width=2,
-            )
-
-            # Navigation arrow during autonomous scan
-            if (
-                self.state == "SEARCH_M2"
-                and self.m1_marker_pos is not None
-                and self.m1_angle_deg is not None
-            ):
-                m1x = self.m1_marker_pos[0] * sim.workspace_pixels_per_mm * sx
-                m1y = self.m1_marker_pos[1] * sim.workspace_pixels_per_mm * sy
-                ar = math.radians(self.m1_angle_deg)
-                arrow_len = 60
-                self.emulator_canvas.create_line(
-                    m1x, m1y,
-                    m1x + arrow_len * math.cos(ar),
-                    m1y + arrow_len * math.sin(ar),
-                    fill="orange", width=2, arrow=tk.LAST,
-                )
-
-            # Position info label
-            info_text = (
-                f"Camera: ({ctrl_x:.1f}, {ctrl_y:.1f}) mm\n"
-                f"Laser: ({laser_x:.1f}, {laser_y:.1f}) mm"
-            )
-            self.emulator_canvas.create_text(
-                200, 380, text=info_text, fill="white",
-                font=("", 9), anchor=tk.S,
-            )
+            # Update the simulator window
+            self.simulator_window.update_view()
 
         self.after(self.delay, self.update)
 

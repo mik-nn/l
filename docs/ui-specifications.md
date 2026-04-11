@@ -14,25 +14,43 @@ The LaserCam UI provides a graphical interface for marker detection, approval/ca
 ┌─────────────────────────────────────────────────────┐
 │ LaserCam                                    [─][□][×]│
 ├─────────────────────────────────────────────────────┤
+│ [File] [Tools] [Help]                               │
+├─────────────────────────────────────────────────────┤
 │                                                     │
-│  ┌───────────────────┐  ┌───────────────────────┐   │
-│  │                   │  │                       │   │
-│  │                   │  │    Workspace Overview  │   │
-│  │   Camera View     │  │    (simulation only)   │   │
-│  │                   │  │                       │   │
-│  │                   │  │                       │   │
-│  └───────────────────┘  └───────────────────────┘   │
+│  ┌───────────────────────────────────────────────┐  │
+│  │                                               │  │
+│  │           Camera View                          │  │
+│  │                                               │  │
+│  └───────────────────────────────────────────────┘  │
 │                                                     │
 ├─────────────────────────────────────────────────────┤
-│ State: IDLE                                         │
+│ State: START                                        │
+│ Controller: Simulated                               │
 ├─────────────────────────────────────────────────────┤
 │  [↑]                                                │
-│  [←] [→]  0.5 mm/step    [Confirm M1] [Cancel]     │
+│  [←] [→]  0.5 mm/step    [Connect & Start] [Reset]│
 │  [↓]                                                │
 └─────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Camera View
+### 2.2 Simulator Window (MVP Only)
+
+```
+┌─────────────────────────────────────┐
+│ Simulator View              [─][□][×]│
+├─────────────────────────────────────┤
+│                                     │
+│   Workspace with markers            │
+│   Red dot: Camera position          │
+│   Blue dot: Laser position          │
+│   Yellow box: Camera FOV            │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+**Note**: The simulator window is MVP-specific. In the final C++/Qt version, this window does not exist - only the camera view is shown.
+
+### 2.3 Camera View
 - Displays live camera feed (real or emulated)
 - Overlays detected markers with:
   - Circle outline around detected marker
@@ -40,12 +58,6 @@ The LaserCam UI provides a graphical interface for marker detection, approval/ca
   - Direction arrow showing angle to next marker
   - Confidence score
 - In CONFIRM states: shows zoomed view (~3×) centered on marker
-
-### 2.3 Workspace Overview (Simulation Mode Only)
-- Shows full workspace with sample/artwork
-- Red rectangle indicates current camera FOV position
-- Orange arrow shows navigation direction during M1→M2 movement
-- Updates in real-time as gantry moves
 
 ---
 
@@ -55,12 +67,14 @@ The LaserCam UI provides a graphical interface for marker detection, approval/ca
 
 | State | Description | Controls Shown |
 |-------|-------------|----------------|
-| `IDLE` | Waiting for marker detection | Nav arrows (coarse 0.5mm/step) |
-| `CONFIRM_M1` | M1 detected, awaiting approval | Nav arrows (fine 0.1mm/step), Confirm M1, Cancel |
-| `NAVIGATE_TO_M2` | Auto-moving toward M2 | Cancel only |
-| `SEARCH_M2` | M2 not found after navigation | Nav arrows (coarse), Cancel |
-| `CONFIRM_M2` | M2 detected, awaiting approval | Nav arrows (fine 0.1mm/step), Confirm M2, Cancel |
-| `DONE` | Alignment complete | None (auto-resets to IDLE after 2s) |
+| `START` | Waiting for operator to begin | Connect & Start, Reset |
+| `SEARCH_M1` | Scanning for M1 marker | Nav arrows (coarse), Reset |
+| `CONFIRM_M1` | M1 detected, awaiting approval | Nav arrows (fine), Confirm M1, Next, Reset |
+| `REGISTER_M1` | Laser positioned at M1, waiting for Next | Next, Reset |
+| `SEARCH_M2` | Auto-navigating toward M2 | Cancel, Reset |
+| `CONFIRM_M2` | M2 detected, awaiting approval | Nav arrows (fine), Confirm M2, Reset |
+| `REGISTER_M2` | Laser positioned at M2 | Done (auto-resets) |
+| `DONE` | Both markers registered | Auto-resets to START |
 
 ### 3.2 State Transitions
 
