@@ -2,7 +2,7 @@
  * LaserMark.jsx  — Illustrator Extension for LaserCam Markers
  *
  * Design: Unified Solid Circle + White Direction Line
- *   Both M1 and M2 are identical solid black circles (5mm diameter)
+ *   Both M1 and M2 are identical solid black circles (6mm diameter)
  *   with a white direction line pointing toward the other marker.
  *
  * The white direction line is a thin rectangle drawn from the shape centre
@@ -20,10 +20,10 @@
  */
 
 var MM = 2.834645669291339;   // Illustrator points per mm (72 pt / 25.4 mm)
-var SHAPE_MM   = 5.0;          // circle diameter (mm)
+var SHAPE_MM   = 6.0;          // circle diameter (mm)
 var LINE_LEN   = 2.0;          // direction line length from center (mm)
 var LINE_WIDTH = 0.7;          // direction line width (mm)
-var CANVAS_MM  = 16.0;         // bounding canvas for each marker (mm)
+var CANVAS_MM  = 4.0;         // bounding canvas for each marker (mm)
 var OFFSET_MM  = 8.0;          // placement offset beyond selection corner (mm)
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ function run() {
         "LaserCam markers placed.\n\n" +
         "M1 (solid circle) : top-right, direction toward M2\n" +
         "M2 (solid circle) : bottom-left, direction toward M1\n\n" +
-        "Both markers are identical 5mm circles with white direction lines.\n" +
+        "Both markers are identical 6mm circles with white direction lines.\n" +
         "Both markers are on layer 'LaserCam Markers'.\n" +
         "Print at 100% scale."
     );

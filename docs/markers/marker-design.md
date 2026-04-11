@@ -10,7 +10,7 @@ LaserCam uses a unified marker design for both M1 and M2 markers. Both markers a
 
 ### 2.1 Shape
 - **Form**: Solid black circle
-- **Diameter**: 4-6mm (5mm recommended)
+- **Diameter**: 6mm
 - **Fill**: 100% black (CMYK: 0, 0, 0, 100)
 - **Stroke**: None
 

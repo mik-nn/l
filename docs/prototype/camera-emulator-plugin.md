@@ -139,7 +139,7 @@ def _render_markers(self, frame, crop_x, crop_y, ppm):
             continue
         
         # Draw solid black circle
-        radius_px = int(5.0 * ppm / 2)  # 5mm diameter
+        radius_px = int(6.0 * ppm / 2)  # 6mm diameter
         cv2.circle(frame, (fx, fy), radius_px, (0, 0, 0), -1)
         
         # Draw white direction line
