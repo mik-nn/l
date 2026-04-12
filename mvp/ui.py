@@ -696,7 +696,6 @@ class App(tk.Tk):
         self.nav_steps_done = 0
         self.state = "REGISTER_M1"
         self.add_controls()
-        self.after(self.delay, self._register_m1)
 
     def confirm_m2(self) -> None:
         """User confirmed M2 position. Move to REGISTER_M2 state."""
@@ -704,7 +703,6 @@ class App(tk.Tk):
             return
         self.state = "REGISTER_M2"
         self.add_controls()
-        self.after(self.delay, self._register_m2)
 
     def _reset_to_start(self) -> None:
         """Auto-reset from DONE back to START."""
@@ -1215,19 +1213,31 @@ class App(tk.Tk):
         self.add_controls()
 
     def _next_after_m1(self) -> None:
-        """User clicks Next after laser is positioned at M1."""
+        """User clicks Next after confirming M1 - move laser and register."""
         if self.state != "REGISTER_M1":
             return
 
+        # Move laser to M1 position first
+        if self.m1_marker_pos:
+            marker_x, marker_y = self.m1_marker_pos
+            target_x = marker_x - self.laser_offset_x
+            target_y = marker_y - self.laser_offset_y
+            self._ensure_connected()
+            self._log(f"Moving laser to ({marker_x:.1f}, {marker_y:.1f}) mm")
+            self.controller.move_to(target_x, target_y)
+            self._release_connection()
+
+        # Then send Alt+1 to register
         self._log("Sending Alt+1 to LightBurn (register M1)...")
         self.bridge.send_alt_1()
 
-        self._ensure_connected()
         # Move camera back to M1 to start search for M2
-        marker_x, marker_y = self.m1_marker_pos
-        self._log("Moving camera back to M1 to start search...")
-        self.controller.move_to(marker_x, marker_y)
-        self._release_connection()
+        if self.m1_marker_pos:
+            marker_x, marker_y = self.m1_marker_pos
+            self._ensure_connected()
+            self._log("Moving camera back to M1 to start search...")
+            self.controller.move_to(marker_x, marker_y)
+            self._release_connection()
 
         self._log("Moving camera toward M2...")
         self.state = "SEARCH_M2"
