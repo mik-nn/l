@@ -851,8 +851,9 @@ class App(tk.Tk):
         btn_frame.pack(pady=10)
 
         def _save():
-            """Save preferences to config, reconnect controller, and apply."""
-            cfg.controller = ctrl_type_var.get()
+            """Save preferences to config."""
+            new_controller = ctrl_type_var.get()
+            cfg.controller = new_controller
             cfg.grbl_port = grbl_port_var.get()
             try:
                 cfg.grbl_baudrate = int(grbl_baud_var.get())
@@ -881,10 +882,19 @@ class App(tk.Tk):
             self.laser_offset_x = cfg.laser_offset_x
             self.laser_offset_y = cfg.laser_offset_y
 
-            # Reconnect controller with new parameters
-            self._reconnect_controller(cfg)
-
             dialog.destroy()
+            
+            # Show message about restarting
+            msg = tk.Toplevel(self)
+            msg.title("Restart Required")
+            msg.geometry("300x100")
+            msg.transient(self)
+            tk.Label(
+                msg, 
+                text=f"Controller changed to {new_controller.upper()}.\nPlease restart the application.",
+                pady=20
+            ).pack()
+            tk.Button(msg, text="OK", command=msg.destroy).pack()
 
         def _test_connection():
             """Test connection using the existing controller (don't create new socket)."""
