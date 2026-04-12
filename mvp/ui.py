@@ -507,9 +507,10 @@ class App(tk.Tk):
             ).grid(row=5, column=4, padx=10)
 
         elif self.state in ("CONFIRM_M1", "CONFIRM_M2"):
-            # AICODE-NOTE: position-tuning mode - ONLY show zoomed view + green circle
-            # No navigation arrows - user moves camera manually if needed
+            # Jog buttons for fine-tuning position
+            _nav_buttons()
             _step_buttons()
+            _goto_buttons()
             label = "Confirm M1" if self.state == "CONFIRM_M1" else "Confirm M2"
             tk.Button(
                 btn_frame,
@@ -524,7 +525,7 @@ class App(tk.Tk):
                 command=self.reset_to_start,
                 bg="red",
                 fg="white",
-            ).grid(row=1, column=5, padx=5)
+            ).grid(row=1, column=5, padx=10)
 
         elif self.state == "REGISTER_M1":
             tk.Button(
