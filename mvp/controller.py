@@ -7,6 +7,19 @@ from abc import ABC, abstractmethod
 
 class BaseController(ABC):
     @property
+    def is_connected(self) -> bool:
+        """Check if controller is currently connected."""
+        raise NotImplementedError
+
+    def connect(self) -> None:
+        """Establish connection if not already connected."""
+        raise NotImplementedError
+
+    def disconnect(self) -> None:
+        """Close connection if open."""
+        raise NotImplementedError
+
+    @property
     @abstractmethod
     def position(self) -> tuple[float, float]:
         """Returns the current (x_mm, y_mm) position of the controller."""
@@ -39,6 +52,17 @@ class SimulatedController(BaseController):
 
     def __init__(self, simulator):
         self._simulator = simulator
+        self._connected = True
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def connect(self) -> None:
+        self._connected = True
+
+    def disconnect(self) -> None:
+        self._connected = True
 
     @property
     def position(self) -> tuple[float, float]:
@@ -82,11 +106,37 @@ class GRBLController(BaseController):
         self._baudrate = baudrate
         self._timeout = timeout
         self._retries = retries
-        self._serial = serial.Serial(port, baudrate, timeout=timeout)
+        self._serial: serial.Serial | None = None
         self._last_position: tuple[float, float] = (0.0, 0.0)
-        self._ensure_absolute_mode()
+        self._connected = False
+        self.connect()
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected and self._serial is not None and self._serial.is_open
+
+    def connect(self) -> None:
+        """Establish serial connection."""
+        if self._connected and self._serial is not None and self._serial.is_open:
+            return
+        try:
+            self._serial = serial.Serial(self._port_name, self._baudrate, timeout=self._timeout)
+            self._connected = True
+            self._ensure_absolute_mode()
+        except serial.SerialException as e:
+            self._connected = False
+            raise ConnectionError(f"Failed to connect to GRBL on {self._port_name}: {e}")
+
+    def disconnect(self) -> None:
+        """Close serial connection."""
+        if self._serial is not None and self._serial.is_open:
+            self._serial.close()
+        self._connected = False
 
     def _send_command(self, cmd: str) -> str:
+        if not self.is_connected:
+            self.connect()
+        assert self._serial is not None and self._serial.is_open
         for attempt in range(self._retries):
             try:
                 self._serial.write(f"{cmd}\n".encode())
@@ -100,6 +150,9 @@ class GRBLController(BaseController):
         return ""
 
     def _send_command_wait(self, cmd: str) -> str:
+        if not self.is_connected:
+            self.connect()
+        assert self._serial is not None and self._serial.is_open
         self._serial.write(f"{cmd}\n".encode())
         while True:
             line = self._serial.readline().decode().strip()
@@ -116,6 +169,9 @@ class GRBLController(BaseController):
     @property
     def position(self) -> tuple[float, float]:
         try:
+            if not self.is_connected:
+                self.connect()
+            assert self._serial is not None and self._serial.is_open
             self._serial.write(b"?\n")
             response = self._serial.readline().decode().strip()
             match = self._STATUS_RE.search(response)
@@ -128,6 +184,8 @@ class GRBLController(BaseController):
         return self._last_position
 
     def move_to(self, x_mm: float, y_mm: float) -> None:
+        if not self.is_connected:
+            self.connect()
         self._send_command_wait(f"G0 X{x_mm:.3f} Y{y_mm:.3f}")
         self._last_position = (x_mm, y_mm)
 
@@ -136,14 +194,16 @@ class GRBLController(BaseController):
         self.move_to(x + dx_mm, y + dy_mm)
 
     def release(self) -> None:
-        if self._serial and self._serial.is_open:
+        self.disconnect()
+        if self._serial:
             self._serial.close()
+            self._serial = None
 
 
 class RuidaController(BaseController):
     """
     A controller for Ruida-based machines.
-    Communicates over UDP on port 50200.
+    Supports both Ethernet (UDP) and USB (Serial) connections.
 
     AICODE-NOTE: Based on MeerK40T's Ruida emulator source analysis.
     Key protocol details:
@@ -174,22 +234,66 @@ class RuidaController(BaseController):
 
     def __init__(
         self,
-        host: str,
+        mode: str = "udp",
+        host: str = "192.168.1.100",
         port: int = 50200,
         listen_port: int = 40200,
+        serial_port: str | None = None,
+        serial_baudrate: int = 115200,
         timeout: float = 1.0,
         retries: int = 3,
     ):
+        self._mode = mode  # "udp" or "serial"
         self._host = host
         self._port = port
         self._listen_port = listen_port
+        self._serial_port = serial_port
+        self._serial_baudrate = serial_baudrate
         self._timeout = timeout
         self._retries = retries
         self._magic = self.DEFAULT_MAGIC
         self._last_position: tuple[float, float] = (0.0, 0.0)
-        self._socket = None
+        self._socket: socket.socket | None = None
+        self._serial: serial.Serial | None = None
         self._connected = False
-        self._connect()
+        self.connect()
+
+    @property
+    def is_connected(self) -> bool:
+        if self._mode == "udp":
+            return self._connected and self._socket is not None
+        else:
+            return self._connected and self._serial is not None and self._serial.is_open
+
+    def connect(self) -> None:
+        """Establish connection (UDP or Serial based on mode)."""
+        if self.is_connected:
+            return
+        if self._mode == "udp":
+            self._connect_udp()
+        else:
+            # For serial mode, only connect if serial port is provided
+            if self._serial_port:
+                self._connect_serial()
+            else:
+                # Default to UDP if no serial port
+                self._mode = "udp"
+                self._connect_udp()
+
+    def disconnect(self) -> None:
+        """Close connection."""
+        self._connected = False
+        if self._mode == "udp":
+            if self._socket:
+                try:
+                    self._socket.close()
+                except Exception:
+                    pass
+                self._socket = None
+        else:
+            if self._serial and self._serial.is_open:
+                self._serial.close()
+            self._serial = None
 
     def _swizzle_byte(self, b: int, magic: int) -> int:
         """Swizzle a single byte using MeerK40T's algorithm."""
@@ -262,7 +366,7 @@ class RuidaController(BaseController):
         checksum = sum(swizzled) & 0xFFFF
         return bytes([(checksum >> 8) & 0xFF, checksum & 0xFF]) + swizzled
 
-    def _connect(self) -> None:
+    def _connect_udp(self) -> None:
         """Create UDP socket and perform ENQ handshake."""
         if self._socket:
             try:
@@ -290,9 +394,6 @@ class RuidaController(BaseController):
                 response, addr = self._socket.recvfrom(1024)
                 print(f"[RUIDA] Raw response: {response.hex()} ({len(response)} bytes)")
 
-                # AICODE-NOTE: MeerK40T's emulator sends responses WITHOUT checksum.
-                # The response is just the swizzled ACK byte (0xC6 for magic 0x88).
-                # MeerK40T's own handshake code unswizzles the entire response.
                 reply = self._unswizzle(response)
                 print(f"[RUIDA] Unswizzled reply: {reply.hex()}")
 
@@ -309,11 +410,6 @@ class RuidaController(BaseController):
                     self._connected = True
                     self._initialize()
                     return
-                elif reply and len(reply) > 0:
-                    print(f"[RUIDA] Controller response {reply.hex()}, accepting connection")
-                    self._connected = True
-                    self._initialize()
-                    return
                 else:
                     print(f"[RUIDA] Unexpected reply: {reply.hex()}")
             except (socket.timeout, OSError) as e:
@@ -321,6 +417,20 @@ class RuidaController(BaseController):
                 if attempt == self._retries - 1:
                     print("[RUIDA] WARNING: Handshake failed, continuing anyway")
                     return
+
+    def _connect_serial(self) -> None:
+        """Create serial connection and perform handshake."""
+        if self._serial_port is None:
+            raise ValueError("Serial port not specified for USB mode")
+        
+        try:
+            self._serial = serial.Serial(self._serial_port, self._serial_baudrate, timeout=self._timeout)
+            self._connected = True
+            self._initialize()
+            print(f"[RUIDA] Connected via USB on {self._serial_port}")
+        except serial.SerialException as e:
+            self._connected = False
+            raise ConnectionError(f"Failed to connect to Ruida on {self._serial_port}: {e}")
 
     def _initialize(self) -> None:
         """Send initialization sequence to set up absolute mode and reference point."""
@@ -342,15 +452,23 @@ class RuidaController(BaseController):
 
     def _send_command(self, data: bytes, expect_reply: bool = False) -> bytes | None:
         """Send a Ruida command and wait for ACK/reply."""
-        if not self._connected:
+        if not self.is_connected:
             print("[RUIDA] Not connected, attempting reconnect...")
-            self._connect()
-            if not self._connected:
+            self.connect()
+            if not self.is_connected:
                 raise ConnectionError("Not connected to Ruida controller")
 
         packet = self._package(data)
         print(f"[RUIDA] Sending {len(packet)} bytes: {packet.hex()} (cmd: {data.hex()})")
 
+        if self._mode == "udp":
+            return self._send_command_udp(packet, expect_reply)
+        else:
+            return self._send_command_serial(data, expect_reply)
+
+    def _send_command_udp(self, packet: bytes, expect_reply: bool) -> bytes | None:
+        """Send command via UDP."""
+        assert self._socket is not None
         for attempt in range(self._retries):
             try:
                 self._socket.sendto(packet, (self._host, self._port))
@@ -378,6 +496,17 @@ class RuidaController(BaseController):
                 print(f"[RUIDA] Network error on attempt {attempt + 1}: {e}")
                 if attempt == self._retries - 1:
                     raise ConnectionError(f"Failed to communicate with Ruida: {e}")
+        return None
+
+    def _send_command_serial(self, data: bytes, expect_reply: bool) -> bytes | None:
+        """Send command via serial (USB)."""
+        assert self._serial is not None and self._serial.is_open
+        packet = self._package(data)
+        self._serial.write(packet)
+        if expect_reply:
+            response = self._serial.read(1024)
+            if response:
+                return self._unswizzle(response)
         return None
 
     @property
@@ -445,7 +574,11 @@ class RuidaController(BaseController):
         self._last_position = (x + dx_mm, y + dy_mm)
 
     def release(self) -> None:
-        """Close the UDP socket."""
-        if self._socket:
+        """Close the connection (UDP socket or serial port)."""
+        self.disconnect()
+        if self._mode == "udp" and self._socket:
             self._socket.close()
             self._socket = None
+        elif self._mode == "serial" and self._serial:
+            self._serial.close()
+            self._serial = None

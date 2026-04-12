@@ -20,27 +20,6 @@ class Application:
         cfg = Config.load()
         controller = None
 
-        if cfg.controller == "grbl":
-            print(f"Connecting to GRBL on {cfg.grbl_port} at {cfg.grbl_baudrate} baud...")
-            controller = GRBLController(
-                port=cfg.grbl_port,
-                baudrate=cfg.grbl_baudrate,
-                timeout=1.0,
-                retries=3,
-            )
-            print(f"GRBL connected. Position: {controller.position}")
-        elif cfg.controller == "ruida":
-            print(f"Connecting to Ruida at {cfg.ruida_host}:{cfg.ruida_port}...")
-            controller = RuidaController(
-                host=cfg.ruida_host,
-                port=cfg.ruida_port,
-                timeout=1.0,
-                retries=3,
-            )
-            print(f"Ruida connected. Position: {controller.position}")
-        else:
-            print(f"Using simulated controller (config: '{cfg.controller}')")
-
         # The camera is always a simulator in this version of the MVP.
         # A real camera implementation would be chosen here based on config.
         self.camera = CameraSimulator(
@@ -65,18 +44,28 @@ class Application:
             cfg.m2_x_mm, cfg.m2_y_mm, "circle", cfg.m2_angle_deg
         )
 
-        # AICODE-NOTE: Initialize position from controller if it can report
-        # its position on startup, otherwise use configured home position.
-        try:
-            pos = controller.position
-            start_x, start_y = pos
-            print(f"Controller reported position: ({start_x:.1f}, {start_y:.1f}) mm")
-        except Exception:
-            start_x, start_y = cfg.home_x_mm, cfg.home_y_mm
-            print(
-                f"Could not query controller position. "
-                f"Using configured home: ({start_x:.1f}, {start_y:.1f}) mm"
-            )
+        # AICODE-NOTE: For real controllers (GRBL/Ruida), connect at startup to read position,
+        # then disconnect so LightBurn can use the controller.
+        from mvp.controller import GRBLController, RuidaController
+        if isinstance(controller, (GRBLController, RuidaController)):
+            try:
+                controller.connect()
+                pos = controller.position
+                start_x, start_y = pos
+                print(f"Controller position: ({start_x:.1f}, {start_y:.1f}) mm")
+                controller.disconnect()
+                print("Controller disconnected (available to LightBurn)")
+            except Exception as e:
+                start_x, start_y = cfg.home_x_mm, cfg.home_y_mm
+                print(f"Controller read failed: {e}. Using home: ({start_x:.1f}, {start_y:.1f}) mm")
+        else:
+            # Simulated controller - just get position
+            try:
+                pos = controller.position
+                start_x, start_y = pos
+                print(f"Simulator position: ({start_x:.1f}, {start_y:.1f}) mm")
+            except Exception:
+                start_x, start_y = cfg.home_x_mm, cfg.home_y_mm
 
         self.camera.move_to(start_x, start_y)
 
@@ -91,6 +80,10 @@ class Application:
             laser_offset_y=cfg.laser_offset_y,
             controller_type=cfg.controller,
         )
+        
+        # Open simulator window automatically on startup
+        from mvp.ui import SimulatorWindow
+        self.ui.simulator_window = SimulatorWindow(self.ui)
 
     def run(self):
         self.ui.mainloop()

@@ -17,6 +17,102 @@ from mvp.bridge import LightBurnBridge
 from mvp.camera import Camera
 from mvp.controller import BaseController
 
+
+class SimulatorWindow:
+    """Separate window showing workspace overview with camera/laser positions."""
+
+    def __init__(self, parent_app):
+        self.parent = parent_app
+        self.window = tk.Toplevel(parent_app)
+        self.window.title("Workspace Overview")
+        self.window.geometry("400x400")
+
+        self.canvas = tk.Canvas(self.window, width=400, height=400)
+        self.canvas.pack()
+        self.photo = None
+
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._update_view()
+
+    def _on_close(self) -> None:
+        self.window.destroy()
+
+    def _update_view(self) -> None:
+        """Update the workspace view."""
+        from mvp.camera_simulator import CameraSimulator
+
+        if not hasattr(self.parent, "camera"):
+            return
+
+        camera = self.parent.camera
+        if not isinstance(camera, CameraSimulator):
+            return
+
+        sim = camera.simulator
+        work_area = sim.work_area
+
+        # Resize workspace to canvas size
+        canvas_w = 400
+        canvas_h = 400
+        overview_img = cv2.resize(work_area, (canvas_w, canvas_h))
+        overview_rgb = cv2.cvtColor(overview_img, cv2.COLOR_BGR2RGB)
+        self.photo = ImageTk.PhotoImage(image=Image.fromarray(overview_rgb))
+
+        # Clear and redraw
+        self.canvas.delete("all")
+        self.canvas.create_image(0, 0, image=self.photo, anchor=tk.NW)
+
+        wa_h, wa_w = work_area.shape[:2]
+        sx = canvas_w / wa_w
+        sy = canvas_h / wa_h
+
+        # Get controller position
+        ctrl_x, ctrl_y = self.parent.controller.position
+        sim.camera_x_mm = ctrl_x
+        sim.camera_y_mm = ctrl_y
+
+        # Camera position (red dot)
+        cam_x_px = ctrl_x * sim.workspace_pixels_per_mm
+        cam_y_px = ctrl_y * sim.workspace_pixels_per_mm
+        self.canvas.create_oval(
+            cam_x_px * sx - 4, cam_y_px * sy - 4,
+            cam_x_px * sx + 4, cam_y_px * sy + 4,
+            fill="red", outline="white", width=2,
+        )
+
+        # Laser position (blue dot)
+        laser_x = ctrl_x + self.parent.laser_offset_x
+        laser_y = ctrl_y + self.parent.laser_offset_y
+        laser_x_px = laser_x * sim.workspace_pixels_per_mm
+        laser_y_px = laser_y * sim.workspace_pixels_per_mm
+        self.canvas.create_oval(
+            laser_x_px * sx - 4, laser_y_px * sy - 4,
+            laser_x_px * sx + 4, laser_y_px * sy + 4,
+            fill="blue", outline="white", width=2,
+        )
+
+        # FOV rectangle (yellow)
+        fov_w_px = int(sim.camera_fov_mm[0] * sim.workspace_pixels_per_mm)
+        fov_h_px = int(sim.camera_fov_mm[1] * sim.workspace_pixels_per_mm)
+        self.canvas.create_rectangle(
+            (cam_x_px - fov_w_px / 2) * sx,
+            (cam_y_px - fov_h_px / 2) * sy,
+            (cam_x_px + fov_w_px / 2) * sx,
+            (cam_y_px + fov_h_px / 2) * sy,
+            outline="yellow", width=2,
+        )
+
+        # Position info
+        info_text = f"Camera: ({ctrl_x:.1f}, {ctrl_y:.1f}) mm\nLaser: ({laser_x:.1f}, {laser_y:.1f}) mm"
+        self.canvas.create_text(
+            200, 380, text=info_text, fill="white",
+            font=("", 9), anchor=tk.S,
+        )
+
+        # Schedule next update if window still exists
+        if self.window.winfo_exists():
+            self.window.after(100, self._update_view)
+
 # Display canvas dimensions — half of the 1240×720 sensor resolution,
 # preserving the aspect ratio (≈ 1.722 : 1).
 _DISPLAY_W = 620
@@ -101,13 +197,9 @@ class App(tk.Tk):
         self.main_frame = tk.Frame(self)
         self.main_frame.pack()
 
-        # Emulator workspace view (left)
-        self.emulator_canvas = tk.Canvas(self.main_frame, width=400, height=400)
-        self.emulator_canvas.pack(side=tk.LEFT)
-
-        # Camera view (right)
+        # Camera view only (simulator view removed - not in final version)
         self.canvas = tk.Canvas(self.main_frame, width=_DISPLAY_W, height=_DISPLAY_H)
-        self.canvas.pack(side=tk.RIGHT)
+        self.canvas.pack()
 
         # Control panel
         self.control_panel = tk.Frame(self)
@@ -142,6 +234,7 @@ class App(tk.Tk):
         menubar.add_cascade(label="Tools", menu=tools_menu)
         tools_menu.add_command(label="Preferences", command=self._show_preferences)
         tools_menu.add_command(label="Calibrate Offset", command=self._show_calibration)
+        tools_menu.add_command(label="Workspace View", command=self._open_simulator_window)
 
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -150,6 +243,7 @@ class App(tk.Tk):
 
         self.add_controls()
 
+        self.simulator_window = None
         self.delay = 15
         self.update()
 
@@ -412,14 +506,15 @@ class App(tk.Tk):
                 fg="white",
             ).grid(row=5, column=4, padx=10)
 
-        elif self.state == "CONFIRM_M1":
-            # AICODE-NOTE: fine nav arrows + step label; camera shows 3× zoom.
-            _nav_buttons()
+        elif self.state in ("CONFIRM_M1", "CONFIRM_M2"):
+            # AICODE-NOTE: position-tuning mode - ONLY show zoomed view + green circle
+            # No navigation arrows - user moves camera manually if needed
             _step_buttons()
+            label = "Confirm M1" if self.state == "CONFIRM_M1" else "Confirm M2"
             tk.Button(
                 btn_frame,
-                text="Confirm M1",
-                command=self.confirm_m1,
+                text=label,
+                command=self.confirm_m1 if self.state == "CONFIRM_M1" else self.confirm_m2,
                 bg="green",
                 fg="white",
             ).grid(row=1, column=4, padx=10)
@@ -457,24 +552,21 @@ class App(tk.Tk):
                 fg="white",
             ).grid(row=0, column=0, padx=5)
 
-        elif self.state == "CONFIRM_M2":
-            # AICODE-NOTE: fine nav arrows for M2 position tuning; zoomed view.
-            _nav_buttons()
-            _step_buttons()
+        elif self.state == "REGISTER_M2":
             tk.Button(
                 btn_frame,
-                text="Confirm M2",
-                command=self.confirm_m2,
+                text="Next",
+                command=self._register_m2,
                 bg="green",
                 fg="white",
-            ).grid(row=1, column=4, padx=10)
+            ).grid(row=0, column=0, padx=5)
             tk.Button(
                 btn_frame,
                 text="Reset",
                 command=self.reset_to_start,
                 bg="red",
                 fg="white",
-            ).grid(row=1, column=5, padx=5)
+            ).grid(row=1, column=0, padx=5)
 
     def _set_step_mode(self, mode: str) -> None:
         """Switch the manual step size mode and redraw controls."""
@@ -487,26 +579,52 @@ class App(tk.Tk):
 
     def move_gantry(self, dx: float, dy: float) -> None:
         """Move by relative amount (no clamping)."""
+        self._ensure_connected()
         self.controller.move_by(dx, dy)
+        self._release_connection()
 
     def move_gantry_clamped(self, dx: float, dy: float) -> None:
         """Move by relative amount, clamped to workspace bounds."""
+        self._ensure_connected()
         cx, cy = self.controller.position
         new_x, new_y = self._clamp_position(cx + dx, cy + dy)
         self.controller.move_to(new_x, new_y)
+        self._release_connection()
         # AICODE-NOTE: refresh controls after movement to update position display
         self.add_controls()
 
     def move_gantry_to(self, x: float, y: float) -> None:
         """Move gantry to absolute coordinates (no clamping)."""
+        self._ensure_connected()
         self.controller.move_to(x, y)
+        self._release_connection()
         self.add_controls()
 
     def move_gantry_to_clamped(self, x: float, y: float) -> None:
         """Move gantry to absolute coordinates, clamped to workspace bounds."""
+        self._ensure_connected()
         cx, cy = self._clamp_position(x, y)
         self.controller.move_to(cx, cy)
+        self._release_connection()
         self.add_controls()
+
+    # ------------------------------------------------------------------
+    # Controller connection management
+    # ------------------------------------------------------------------
+
+    def _ensure_connected(self) -> None:
+        """Connect to controller if not already connected."""
+        from mvp.controller import GRBLController, RuidaController
+        if isinstance(self.controller, (GRBLController, RuidaController)):
+            if not self.controller.is_connected:
+                self.controller.connect()
+
+    def _release_connection(self) -> None:
+        """Release controller connection after movement so LightBurn can use it."""
+        from mvp.controller import GRBLController, RuidaController
+        if isinstance(self.controller, (GRBLController, RuidaController)):
+            if self.controller.is_connected:
+                self.controller.disconnect()
 
     # ------------------------------------------------------------------
     # State transitions
@@ -518,6 +636,8 @@ class App(tk.Tk):
 
         if isinstance(self.controller, (GRBLController, RuidaController)):
             try:
+                if not self.controller.is_connected:
+                    self.controller.connect()
                 pos = self.controller.position
                 self._log(f"Controller connected. Position: ({pos[0]:.1f}, {pos[1]:.1f}) mm")
             except Exception as e:
@@ -528,12 +648,14 @@ class App(tk.Tk):
 
     def start_process(self) -> None:
         """Begin the alignment process — transition from START to SEARCH_M1."""
+        self._ensure_connected()
         self._log("Starting marker detection. Move camera toward M1 at (809, 480) mm")
         self.state = "SEARCH_M1"
         self.add_controls()
 
     def reset_to_start(self) -> None:
         """Reset the entire process back to START state."""
+        self._release_connection()
         self.state = "START"
         self.detected_marker = None
         self.m1_angle_deg = None
@@ -1076,6 +1198,7 @@ class App(tk.Tk):
             self.add_controls()
             return
 
+        self._ensure_connected()
         marker_x, marker_y = self.m1_marker_pos
 
         # AICODE-NOTE: To move the LASER to the marker, we must move the GANTRY 
@@ -1085,6 +1208,7 @@ class App(tk.Tk):
 
         self._log(f"Moving laser to ({marker_x:.1f}, {marker_y:.1f}) mm")
         self.controller.move_to(target_gantry_x, target_gantry_y)
+        self._release_connection()
 
         self._log("Laser positioned. Click 'Next' to register in LightBurn.")
         self.add_controls()
@@ -1097,10 +1221,12 @@ class App(tk.Tk):
         self._log("Sending Alt+1 to LightBurn (register M1)...")
         self.bridge.send_alt_1()
 
+        self._ensure_connected()
         # Move camera back to M1 to start search for M2
         marker_x, marker_y = self.m1_marker_pos
         self._log("Moving camera back to M1 to start search...")
         self.controller.move_to(marker_x, marker_y)
+        self._release_connection()
 
         self._log("Moving camera toward M2...")
         self.state = "SEARCH_M2"
@@ -1145,8 +1271,10 @@ class App(tk.Tk):
             self.add_controls()
             return
 
+        self._ensure_connected()
         self._log(f"Moving camera to M2 (step {self.nav_steps_done + 1})...")
         self.controller.move_in_direction(self.m1_angle_deg, fov_step)
+        self._release_connection()
         self.nav_steps_done += 1
 
         # Check if M2 is now in view (exclude M1 marker position)
@@ -1214,6 +1342,7 @@ class App(tk.Tk):
 
         # AICODE-NOTE: cam_x, cam_y is the absolute position of the M2 marker in the world.
         # To position the LASER over M2, we must move the GANTRY to (M2 - offset).
+        self._ensure_connected()
         laser_x = cam_x
         laser_y = cam_y
         target_gantry_x = laser_x - self.laser_offset_x
@@ -1221,6 +1350,7 @@ class App(tk.Tk):
 
         self._log(f"Moving laser to ({laser_x:.1f}, {laser_y:.1f}) mm")
         self.controller.move_to(target_gantry_x, target_gantry_y)
+        self._release_connection()
 
         self._log("Sending Alt+2 to LightBurn (register M2)...")
         self.bridge.send_alt_2()
@@ -1471,100 +1601,15 @@ class App(tk.Tk):
         else:
             self.canvas.itemconfig(self._camera_image_item, image=self.photo)
 
-        # Emulator workspace view — shows full workspace with laser/camera positions
-        from mvp.camera_simulator import CameraSimulator
-
-        if isinstance(self.camera, CameraSimulator):
-            sim = self.camera.simulator
-            work_area = sim.work_area
-
-            # Draw workspace overview
-            canvas_w = self.emulator_canvas.winfo_width()
-            canvas_h = self.emulator_canvas.winfo_height()
-            if canvas_w < 1: canvas_w = 400
-            if canvas_h < 1: canvas_h = 400
-            
-            overview_img = cv2.resize(work_area, (canvas_w, canvas_h))
-            overview_rgb = cv2.cvtColor(overview_img, cv2.COLOR_BGR2RGB)
-            self.emulator_photo = ImageTk.PhotoImage(
-                image=Image.fromarray(overview_rgb)
-            )
-            
-            # Clear emulator canvas to prevent memory leak of drawn shapes
-            self.emulator_canvas.delete("all")
-            self.emulator_canvas.create_image(
-                0, 0, image=self.emulator_photo, anchor=tk.NW
-            )
-
-            wa_h, wa_w = work_area.shape[:2]
-            sx = canvas_w / wa_w
-            sy = canvas_h / wa_h
-
-            # AICODE-NOTE: Use actual controller position, not simulator's internal position
-            ctrl_x, ctrl_y = self.controller.position
-            sim.camera_x_mm = ctrl_x
-            sim.camera_y_mm = ctrl_y
-
-            # Camera position (red dot)
-            cam_x_px = ctrl_x * sim.workspace_pixels_per_mm
-            cam_y_px = ctrl_y * sim.workspace_pixels_per_mm
-
-            self.emulator_canvas.create_oval(
-                cam_x_px * sx - 4, cam_y_px * sy - 4,
-                cam_x_px * sx + 4, cam_y_px * sy + 4,
-                fill="red", outline="white", width=2,
-            )
-
-            # Laser position (blue dot, offset from camera)
-            laser_x = ctrl_x + self.laser_offset_x
-            laser_y = ctrl_y + self.laser_offset_y
-            laser_x_px = laser_x * sim.workspace_pixels_per_mm
-            laser_y_px = laser_y * sim.workspace_pixels_per_mm
-            self.emulator_canvas.create_oval(
-                laser_x_px * sx - 4, laser_y_px * sy - 4,
-                laser_x_px * sx + 4, laser_y_px * sy + 4,
-                fill="blue", outline="white", width=2,
-            )
-
-            # FOV rectangle (yellow)
-            fov_w_px = int(sim.camera_fov_mm[0] * sim.workspace_pixels_per_mm)
-            fov_h_px = int(sim.camera_fov_mm[1] * sim.workspace_pixels_per_mm)
-            self.emulator_canvas.create_rectangle(
-                (cam_x_px - fov_w_px / 2) * sx,
-                (cam_y_px - fov_h_px / 2) * sy,
-                (cam_x_px + fov_w_px / 2) * sx,
-                (cam_y_px + fov_h_px / 2) * sy,
-                outline="yellow", width=2,
-            )
-
-            # Navigation arrow during autonomous scan
-            if (
-                self.state == "SEARCH_M2"
-                and self.m1_marker_pos is not None
-                and self.m1_angle_deg is not None
-            ):
-                m1x = self.m1_marker_pos[0] * sim.workspace_pixels_per_mm * sx
-                m1y = self.m1_marker_pos[1] * sim.workspace_pixels_per_mm * sy
-                ar = math.radians(self.m1_angle_deg)
-                arrow_len = 60
-                self.emulator_canvas.create_line(
-                    m1x, m1y,
-                    m1x + arrow_len * math.cos(ar),
-                    m1y + arrow_len * math.sin(ar),
-                    fill="orange", width=2, arrow=tk.LAST,
-                )
-
-            # Position info label
-            info_text = (
-                f"Camera: ({ctrl_x:.1f}, {ctrl_y:.1f}) mm\n"
-                f"Laser: ({laser_x:.1f}, {laser_y:.1f}) mm"
-            )
-            self.emulator_canvas.create_text(
-                200, 380, text=info_text, fill="white",
-                font=("", 9), anchor=tk.S,
-            )
+        # NOTE: Emulator workspace view removed from main window
+        # Use Tools > Workspace View to open separate window
 
         self.after(self.delay, self.update)
+
+    def _open_simulator_window(self) -> None:
+        """Open separate simulator window."""
+        if not hasattr(self, "simulator_window") or not self.simulator_window.window.winfo_exists():
+            self.simulator_window = SimulatorWindow(self)
 
     def on_closing(self) -> None:
         self.camera.release()

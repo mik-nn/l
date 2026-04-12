@@ -8,7 +8,7 @@ LaserCam is a marker-based laser alignment application that automates the Print&
 - Displays detected markers in a zoomed view with a green circle overlay for visual verification
 - Allows the user to fine-tune position, confirm, or cancel marker detection
 - Moves the laser to the centre of each confirmed marker (accounting for camera-laser offset)
-- Registers marker positions in LightBurn by simulating Alt+1 / Alt+2 hotkeys
+- Does NOT send any hooks to LightBurn - instead provides a 'Next' button for user control
 - Navigates autonomously from M1 to M2 using the direction line on the marker
 - Calibrates and monitors the offset between laser and camera
 
@@ -27,19 +27,19 @@ The system is developed in two stages:
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Operator Workflow                           │
 │                                                                 │
-│  1. Operator positions camera over M1 (via jog / LightBurn)     │
+│  1. Operator positions camera over M1 (via jog / LightBurn)      │
 │  2. Selects "Register M1" in LightBurn Print&Cut                │
 │  3. LaserCam detects marker, shows zoomed view + green circle   │
 │  4. Operator fine-tunes position if needed                      │
 │  5. Operator confirms → LaserCam moves laser to marker centre   │
-│  6. LaserCam sends Alt+1 to LightBurn (registers M1)            │
+│  6. Operator clicks "Next" button in LaserCam                   │
 │                                                                 │
 │  7. Operator selects "Register M2" in LightBurn Print&Cut       │
 │  8. LaserCam determines direction from M1's marker line         │
 │  9. LaserCam moves camera toward M2 autonomously                │
 │ 10. M2 enters FOV → LaserCam detects, shows zoomed view         │
 │ 11. Operator fine-tunes, confirms                              │
-│ 12. LaserCam moves laser to M2 centre, sends Alt+2 to LightBurn │
+│ 12. LaserCam moves laser to M2 centre                          │
 │                                                                 │
 │  13. LightBurn now has both registration points → ready to cut  │
 └─────────────────────────────────────────────────────────────────┘
@@ -47,11 +47,73 @@ The system is developed in two stages:
 
 ---
 
-## 3. State Machine
+## 3. Application Windows
+
+### 3.1 Window Layout
+
+The MVP application displays **two windows** on startup:
+
+1. **Main Window** - Camera view with controls
+2. **Workspace Overview** - Simulator view showing:
+   - Full workspace image
+   - Camera position (red dot)
+   - Laser position (blue dot, offset from camera)
+   - Current FOV (yellow rectangle)
+   - Position coordinates
+
+Both windows open automatically when the application starts.
+
+---
+
+## 4. Controller Connection Model
+
+### 4.1 Connection at Startup
+
+When the application starts:
+1. **Connect** to the controller (GRBL/Ruida)
+2. **Read** current coordinates from controller
+3. **Disconnect** - release controller for LightBurn to use
+
+```
+Application Start:
+  → Connect to controller
+  → Read position (X, Y)
+  → Log: "Controller position: (123.4, 567.8) mm"
+  → Disconnect (controller available to LightBurn)
+```
+
+### 4.2 Connection Before Movement
+
+Before each movement command:
+1. **Connect** to controller
+2. **Execute** movement
+3. **Disconnect** - release for LightBurn
+
+**Connection Pattern:**
+1. **Before Movement**: Connect, perform move, disconnect
+2. **Idle**: Controller is disconnected, available to LightBurn
+
+**Supported Controllers:**
+- **GRBL** (Serial over USB)
+- **Ruida** (Ethernet UDP or Serial USB)
+- **Simulated** (for development without hardware)
+
+### 3.2 Connection Methods
+
+| Controller | Transport | Default Port |
+|------------|-----------|--------------|
+| GRBL | Serial (USB) | COM3 @ 115200 |
+| Ruida (UDP) | Ethernet | 192.168.1.100:50200 |
+| Ruida (USB) | Serial (USB) | Configurable |
+| Simulated | None | N/A |
+
+---
+
+## 4. State Machine
 
 ```
                          ┌──────────────┐
-                         │    START     │  ← Initial state, controller connected
+                         │    START     │  ← Initial state, controller disconnected
                          └──────┬───────┘
                                 │ operator clicks "Connect & Start"
                                 ▼

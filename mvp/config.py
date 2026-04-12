@@ -9,8 +9,12 @@ class Config:
     controller: str = "simulated"
     grbl_port: str = "COM3"
     grbl_baudrate: int = 115200
+    # Ruida: mode "udp" (Ethernet) or "serial" (USB)
+    ruida_mode: str = "udp"
     ruida_host: str = "192.168.1.100"
     ruida_port: int = 50200
+    ruida_serial_port: str | None = None
+    ruida_serial_baudrate: int = 115200
     camera_resolution: tuple[int, int] = (1240, 720)
     camera_fov_mm: tuple[float, float] = (210.0, 122.0)
     workspace_image: str = "Workspace90x60cm+sample.png"

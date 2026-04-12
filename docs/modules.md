@@ -88,10 +88,27 @@ Abstract the control of the laser gantry, whether real or simulated.
 - `move_by(dx, dy)`: Move by a relative amount
 - `move_in_direction(angle, distance)`: Move along a vector
 - `position`: Get the current gantry position
+- Connection management:
+  - `is_connected`: Check if controller is connected
+  - `connect()`: Establish connection when needed
+  - `disconnect()`: Release connection after movement so LightBurn can use controller
 - Implement concrete controller classes:
-  - `SimulatedController`: Wraps the MeerK40t laser emulator
-  - `GRBLController`: Sends G-code commands over serial
-  - `RuidaController`: Sends commands over UDP
+  - `SimulatedController`: Wraps the MeerK40t laser emulator (no-op connection)
+  - `GRBLController`: Sends G-code commands over serial (USB)
+  - `RuidaController`: Sends commands over UDP (Ethernet) or Serial (USB)
+
+### Connection Model
+The controller is NOT kept connected at all times. This allows LightBurn to use the controller when LaserCam is idle.
+
+**Flow:**
+1. UI calls `_ensure_connected()` before any movement
+2. Movement command is sent to controller
+3. UI calls `_release_connection()` after movement completes
+
+**Supported Configurations:**
+- GRBL: Serial port (e.g., COM3), baud rate (default 115200)
+- Ruida UDP: Host + port (default 192.168.1.100:50200)
+- Ruida USB: Serial port + baud rate
 
 ### Inputs
 - For real controllers: port, baud rate, host, etc.
