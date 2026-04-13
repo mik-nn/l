@@ -390,8 +390,13 @@ class App(tk.Tk):
         btn_frame = tk.Frame(self.control_panel)
         btn_frame.pack()
 
-        # START state: show Connect button
+        # START state: show Connect button and current position
         if self.state == "START":
+            # Read current position from controller
+            pos = self.controller.position
+            tk.Label(btn_frame, text=f"Position: ({pos[0]:.1f}, {pos[1]:.1f}) mm", font=("", 12)).grid(
+                row=0, column=0, columnspan=2, pady=5
+            )
             tk.Button(
                 btn_frame,
                 text="▶ Connect & Start",
@@ -399,14 +404,14 @@ class App(tk.Tk):
                 bg="green",
                 fg="white",
                 font=("", 14),
-            ).grid(row=0, column=0, columnspan=2, pady=10)
+            ).grid(row=1, column=0, columnspan=2, pady=10)
             # Show current controller type and offset
             info_text = (
                 f"Controller: {self.controller_type}\n"
                 f"Offset: ({self.laser_offset_x:.1f}, {self.laser_offset_y:.1f}) mm"
             )
             tk.Label(btn_frame, text=info_text, justify=tk.LEFT).grid(
-                row=1, column=0, columnspan=2, pady=5
+                row=2, column=0, columnspan=2, pady=5
             )
             return
 
