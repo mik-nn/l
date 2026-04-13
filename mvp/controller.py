@@ -511,12 +511,11 @@ class RuidaController(BaseController):
 
     @property
     def position(self) -> tuple[float, float]:
-        """Return tracked position based on move commands sent.
-
-        AICODE-NOTE: MeerK40T's Ruida emulator doesn't expose actual position
-        via 0xDA 0x00 memory queries. Position is tracked locally.
+        """Return current position from controller.
+        
+        Queries the controller for actual position to get real coordinates.
         """
-        return self._last_position
+        return self._sync_position()
 
     def _sync_position(self) -> tuple[float, float]:
         """Query controller for position via memory read.
