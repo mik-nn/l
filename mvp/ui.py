@@ -646,7 +646,7 @@ class App(tk.Tk):
         """Read controller position with proper connection management."""
         self._ensure_connected()
         self._start_idle_timer()
-        return self._read_position()
+        return self.controller.position
 
     # ------------------------------------------------------------------
     # State transitions
@@ -1447,11 +1447,11 @@ class App(tk.Tk):
         # REGISTER_M1/M2/DONE = no detection.
 
         if self.state == "SEARCH_M1":
-            # AICODE-NOTE: sync simulator with controller before detection
+            # AICODE-NOTE: sync simulator with cached controller position
             if isinstance(self.camera, CameraSimulator):
-                ctrl_x, ctrl_y = self._read_position()
-                self.camera.simulator.camera_x_mm = ctrl_x
-                self.camera.simulator.camera_y_mm = ctrl_y
+                pos = self.controller.position  # Use cached position
+                self.camera.simulator.camera_x_mm = pos[0]
+                self.camera.simulator.camera_y_mm = pos[1]
 
             found, center, shape_type, angle_deg = (
                 self.camera.find_marker()  # pyright: ignore[reportAttributeAccessIssue]
