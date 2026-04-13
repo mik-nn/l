@@ -288,7 +288,7 @@ class App(tk.Tk):
                     timeout=1.0,
                     retries=3,
                 )
-                pos = self.controller.position
+                pos = self._read_position()
                 self._log(f"GRBL connected on {cfg.grbl_port}. Position: {pos}")
             except Exception as e:
                 self._log(f"GRBL connection failed: {e}. Using simulated.")
@@ -301,7 +301,7 @@ class App(tk.Tk):
                     timeout=1.0,
                     retries=3,
                 )
-                pos = self.controller.position
+                pos = self._read_position()
                 self._log(f"Ruida connected at {cfg.ruida_host}:{cfg.ruida_port}. Position: {pos}")
             except Exception as e:
                 self._log(f"Ruida connection failed: {e}. Using simulated.")
@@ -473,12 +473,12 @@ class App(tk.Tk):
         def _goto_buttons(row_offset=4):
             """Entry fields and button for absolute coordinate movement."""
             tk.Label(btn_frame, text="X:").grid(row=row_offset, column=0, sticky=tk.E)
-            x_var = tk.StringVar(value=f"{self.controller.position[0]:.1f}")
+            x_var = tk.StringVar(value=f"{self._read_position()[0]:.1f}")
             x_entry = tk.Entry(btn_frame, textvariable=x_var, width=8)
             x_entry.grid(row=row_offset, column=1)
 
             tk.Label(btn_frame, text="Y:").grid(row=row_offset, column=2, sticky=tk.E)
-            y_var = tk.StringVar(value=f"{self.controller.position[1]:.1f}")
+            y_var = tk.StringVar(value=f"{self._read_position()[1]:.1f}")
             y_entry = tk.Entry(btn_frame, textvariable=y_var, width=8)
             y_entry.grid(row=row_offset, column=3)
 
@@ -580,33 +580,36 @@ class App(tk.Tk):
 
     def move_gantry(self, dx: float, dy: float) -> None:
         """Move by relative amount (no clamping)."""
+        self._cancel_idle_timer()
         self._ensure_connected()
         self.controller.move_by(dx, dy)
-        self._release_connection()
+        self._start_idle_timer()
 
     def move_gantry_clamped(self, dx: float, dy: float) -> None:
         """Move by relative amount, clamped to workspace bounds."""
+        self._cancel_idle_timer()
         self._ensure_connected()
-        cx, cy = self.controller.position
+        cx, cy = self._read_position()
         new_x, new_y = self._clamp_position(cx + dx, cy + dy)
         self.controller.move_to(new_x, new_y)
-        self._release_connection()
-        # AICODE-NOTE: refresh controls after movement to update position display
+        self._start_idle_timer()
         self.add_controls()
 
     def move_gantry_to(self, x: float, y: float) -> None:
         """Move gantry to absolute coordinates (no clamping)."""
+        self._cancel_idle_timer()
         self._ensure_connected()
         self.controller.move_to(x, y)
-        self._release_connection()
+        self._start_idle_timer()
         self.add_controls()
 
     def move_gantry_to_clamped(self, x: float, y: float) -> None:
         """Move gantry to absolute coordinates, clamped to workspace bounds."""
+        self._cancel_idle_timer()
         self._ensure_connected()
         cx, cy = self._clamp_position(x, y)
         self.controller.move_to(cx, cy)
-        self._release_connection()
+        self._start_idle_timer()
         self.add_controls()
 
     # ------------------------------------------------------------------
@@ -627,6 +630,24 @@ class App(tk.Tk):
             if self.controller.is_connected:
                 self.controller.disconnect()
 
+    def _start_idle_timer(self) -> None:
+        """Start 1 second idle timer to release controller."""
+        if hasattr(self, '_idle_timer') and self._idle_timer:
+            self.after_cancel(self._idle_timer)
+        self._idle_timer = self.after(1000, self._release_connection)
+
+    def _cancel_idle_timer(self) -> None:
+        """Cancel idle timer when button pressed."""
+        if hasattr(self, '_idle_timer') and self._idle_timer:
+            self.after_cancel(self._idle_timer)
+            self._idle_timer = None
+
+    def _read_position(self) -> tuple[float, float]:
+        """Read controller position with proper connection management."""
+        self._ensure_connected()
+        self._start_idle_timer()
+        return self._read_position()
+
     # ------------------------------------------------------------------
     # State transitions
     # ------------------------------------------------------------------
@@ -639,7 +660,7 @@ class App(tk.Tk):
             try:
                 if not self.controller.is_connected:
                     self.controller.connect()
-                pos = self.controller.position
+                pos = self._read_position()
                 self._log(f"Controller connected. Position: ({pos[0]:.1f}, {pos[1]:.1f}) mm")
             except Exception as e:
                 self._log(f"Connection failed: {e}")
@@ -673,7 +694,7 @@ class App(tk.Tk):
         if angle_deg is None:
             return  # direction is required for autonomous M2 navigation
         self.m1_angle_deg = angle_deg
-        self.m1_camera_pos = self.controller.position
+        self.m1_camera_pos = self._read_position()
 
         # AICODE-NOTE: Store actual M1 marker position in world coordinates
         # for proper exclusion during M2 search
@@ -691,7 +712,7 @@ class App(tk.Tk):
                 self.camera.simulator.camera_y_mm - hfy + center[1] / ppm_y,
             )
         else:
-            self.m1_marker_pos = self.controller.position
+            self.m1_marker_pos = self._read_position()
 
         self.nav_steps_done = 0
         self.state = "REGISTER_M1"
@@ -904,7 +925,7 @@ class App(tk.Tk):
                 self._log("Simulated controller — always connected.")
             elif isinstance(self.controller, (GRBLController, RuidaController)):
                 try:
-                    pos = self.controller.position
+                    pos = self._read_position()
                     ctrl_name = "GRBL" if isinstance(self.controller, GRBLController) else "Ruida"
                     self._log(f"{ctrl_name} connected. Position: ({pos[0]:.1f}, {pos[1]:.1f}) mm")
                 except Exception as e:
@@ -998,7 +1019,7 @@ class App(tk.Tk):
         def _jog(dx, dy):
             step = float(step_var.get())
             self.controller.move_by(dx * step, dy * step)
-            pos = self.controller.position
+            pos = self._read_position()
             cam_pos_var.set(f"Camera: ({pos[0]:.1f}, {pos[1]:.1f}) mm")
             _update_view()
 
@@ -1014,7 +1035,7 @@ class App(tk.Tk):
             # Detect calibration marker
             if marker_drawn[0] and sim.calibration_marker_pos is not None:
                 mx, my = sim.calibration_marker_pos
-                cam_x, cam_y = self.controller.position
+                cam_x, cam_y = self._read_position()
                 fov_w, fov_h = sim.camera_fov_mm
 
                 # Check if marker is in FOV
@@ -1119,7 +1140,7 @@ class App(tk.Tk):
             target_x = sim.material_x_mm - sim.material_w_mm / 4
             target_y = sim.material_y_mm
             self.controller.move_to(target_x, target_y)
-            pos = self.controller.position
+            pos = self._read_position()
             laser_pos[0], laser_pos[1] = pos
             laser_pos_var.set(f"Laser: ({pos[0]:.1f}, {pos[1]:.1f}) mm")
             cam_pos_var.set(f"Camera: ({pos[0]:.1f}, {pos[1]:.1f}) mm")
@@ -1128,7 +1149,7 @@ class App(tk.Tk):
 
         def _draw_marker():
             """Draw calibration marker at laser position."""
-            pos = self.controller.position
+            pos = self._read_position()
             laser_pos[0], laser_pos[1] = pos
             laser_pos_var.set(f"Laser: ({pos[0]:.1f}, {pos[1]:.1f}) mm")
             sim.draw_calibration_marker(pos[0], pos[1])
@@ -1143,7 +1164,7 @@ class App(tk.Tk):
                 return
 
             # Camera position when marker was detected
-            cam_x, cam_y = self.controller.position
+            cam_x, cam_y = self._read_position()
             # Laser position when marker was drawn
             lx, ly = laser_pos
 
@@ -1278,7 +1299,7 @@ class App(tk.Tk):
         fov_step = self._fov_step() / 2.0
 
         # Workspace boundary check
-        cx, cy = self.controller.position
+        cx, cy = self._read_position()
         dx = fov_step * math.cos(math.radians(self.m1_angle_deg))
         dy = fov_step * math.sin(math.radians(self.m1_angle_deg))
         new_x, new_y = cx + dx, cy + dy
@@ -1428,7 +1449,7 @@ class App(tk.Tk):
         if self.state == "SEARCH_M1":
             # AICODE-NOTE: sync simulator with controller before detection
             if isinstance(self.camera, CameraSimulator):
-                ctrl_x, ctrl_y = self.controller.position
+                ctrl_x, ctrl_y = self._read_position()
                 self.camera.simulator.camera_x_mm = ctrl_x
                 self.camera.simulator.camera_y_mm = ctrl_y
 
@@ -1457,7 +1478,7 @@ class App(tk.Tk):
                     self.controller.move_to(marker_x, marker_y)
 
                     # Sync again after move
-                    ctrl_x, ctrl_y = self.controller.position
+                    ctrl_x, ctrl_y = self._read_position()
                     self.camera.simulator.camera_x_mm = ctrl_x
                     self.camera.simulator.camera_y_mm = ctrl_y
 
@@ -1467,7 +1488,7 @@ class App(tk.Tk):
                 self.add_controls()
             else:
                 # Show distance to M1 to help user navigate
-                ctrl_x, ctrl_y = self.controller.position
+                ctrl_x, ctrl_y = self._read_position()
                 from mvp.config import Config
                 cfg = Config.load()
                 dist = math.sqrt((cfg.m1_x_mm - ctrl_x)**2 + (cfg.m1_y_mm - ctrl_y)**2)
@@ -1489,7 +1510,7 @@ class App(tk.Tk):
         elif self.state == "SEARCH_M2":
             # AICODE-NOTE: sync simulator with controller before detection
             if isinstance(self.camera, CameraSimulator):
-                ctrl_x, ctrl_y = self.controller.position
+                ctrl_x, ctrl_y = self._read_position()
                 self.camera.simulator.camera_x_mm = ctrl_x
                 self.camera.simulator.camera_y_mm = ctrl_y
 
@@ -1523,7 +1544,7 @@ class App(tk.Tk):
                     self.controller.move_to(marker_x, marker_y)
 
                     # Sync again after move
-                    ctrl_x, ctrl_y = self.controller.position
+                    ctrl_x, ctrl_y = self._read_position()
                     self.camera.simulator.camera_x_mm = ctrl_x
                     self.camera.simulator.camera_y_mm = ctrl_y
 
