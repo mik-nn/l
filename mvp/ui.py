@@ -719,14 +719,53 @@ class App(tk.Tk):
         else:
             self.m1_marker_pos = self._read_position()
 
+        # Move laser to M1 marker center immediately after confirming
+        if self.m1_marker_pos:
+            marker_x, marker_y = self.m1_marker_pos
+            target_x = marker_x - self.laser_offset_x
+            target_y = marker_y - self.laser_offset_y
+            self._ensure_connected()
+            self._log(f"Moving laser to ({marker_x:.1f}, {marker_y:.1f}) mm")
+            self.controller.move_to(target_x, target_y)
+            self._start_idle_timer()
+
         self.nav_steps_done = 0
         self.state = "REGISTER_M1"
         self.add_controls()
 
     def confirm_m2(self) -> None:
-        """User confirmed M2 position. Move to REGISTER_M2 state."""
+        """User confirmed M2 position. Move laser to marker center."""
         if self.detected_marker is None:
             return
+        
+        # Calculate M2 world position from detected marker
+        from mvp.camera_simulator import CameraSimulator
+        
+        center = self.detected_marker[0]
+        if isinstance(self.camera, CameraSimulator) and center is not None:
+            fov_w, fov_h = self.camera.simulator.camera_fov_mm
+            res_w, res_h = self.camera.simulator.camera_fov_px
+            ppm_x = res_w / fov_w
+            ppm_y = res_h / fov_h
+            hfx = fov_w / 2
+            hfy = fov_h / 2
+            m2_marker_pos = (
+                self.camera.simulator.camera_x_mm - hfx + center[0] / ppm_x,
+                self.camera.simulator.camera_y_mm - hfy + center[1] / ppm_y,
+            )
+        else:
+            m2_marker_pos = self._read_position()
+        
+        # Move laser to M2 marker center immediately after confirming
+        if m2_marker_pos:
+            marker_x, marker_y = m2_marker_pos
+            target_x = marker_x - self.laser_offset_x
+            target_y = marker_y - self.laser_offset_y
+            self._ensure_connected()
+            self._log(f"Moving laser to ({marker_x:.1f}, {marker_y:.1f}) mm")
+            self.controller.move_to(target_x, target_y)
+            self._start_idle_timer()
+
         self.state = "REGISTER_M2"
         self.add_controls()
 
@@ -1249,21 +1288,11 @@ class App(tk.Tk):
         self.add_controls()
 
     def _next_after_m1(self) -> None:
-        """User clicks Next after confirming M1 - move laser and register."""
+        """User clicks Next after confirming M1 - send hotkey and start M2 search."""
         if self.state != "REGISTER_M1":
             return
 
-        # Move laser to M1 position first
-        if self.m1_marker_pos:
-            marker_x, marker_y = self.m1_marker_pos
-            target_x = marker_x - self.laser_offset_x
-            target_y = marker_y - self.laser_offset_y
-            self._ensure_connected()
-            self._log(f"Moving laser to ({marker_x:.1f}, {marker_y:.1f}) mm")
-            self.controller.move_to(target_x, target_y)
-            self._release_connection()
-
-        # Then send Alt+1 to register
+        # Send Alt+1 to register in LightBurn
         self._log("Sending Alt+1 to LightBurn (register M1)...")
         self.bridge.send_alt_1()
 
@@ -1273,7 +1302,7 @@ class App(tk.Tk):
             self._ensure_connected()
             self._log("Moving camera back to M1 to start search...")
             self.controller.move_to(marker_x, marker_y)
-            self._release_connection()
+            self._start_idle_timer()
 
         self._log("Moving camera toward M2...")
         self.state = "SEARCH_M2"
