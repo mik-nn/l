@@ -19,17 +19,37 @@ class Application:
     def __init__(self):
         cfg = Config.load()
         controller = None
-
-        # The camera is always a simulator in this version of the MVP.
-        # A real camera implementation would be chosen here based on config.
+        
+        # Create real controller if configured (GRBL or Ruida), before camera
+        if cfg.controller == "grbl":
+            print(f"Creating GRBL controller on {cfg.grbl_port}...")
+            controller = GRBLController(
+                port=cfg.grbl_port,
+                baudrate=cfg.grbl_baudrate,
+                timeout=1.0,
+                retries=3,
+            )
+        elif cfg.controller == "ruida":
+            print(f"Creating Ruida controller (mode: {cfg.ruida_mode})...")
+            controller = RuidaController(
+                mode=cfg.ruida_mode,
+                host=cfg.ruida_host,
+                port=cfg.ruida_port,
+                serial_port=cfg.ruida_serial_port,
+                timeout=1.0,
+                retries=3,
+            )
+        
+        # Create camera with controller (simulated camera always, with real or simulated controller)
         self.camera = CameraSimulator(
-            controller=controller,
+            controller=controller,  # Will use SimulatedController if none provided
             workspace_image_path=cfg.workspace_image,
             camera_fov=cfg.camera_fov_mm,
             workspace_pixels_per_mm=cfg.workspace_pixels_per_mm,
             camera_resolution_px=cfg.camera_resolution,
         )
-
+        
+        # If still no controller, use simulated one from camera
         if controller is None:
             controller = self.camera.controller
 
@@ -46,7 +66,6 @@ class Application:
 
         # AICODE-NOTE: For real controllers (GRBL/Ruida), connect at startup to read position,
         # then disconnect so LightBurn can use the controller.
-        from mvp.controller import GRBLController, RuidaController
         if isinstance(controller, (GRBLController, RuidaController)):
             try:
                 controller.connect()
