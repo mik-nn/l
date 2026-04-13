@@ -609,6 +609,7 @@ class App(tk.Tk):
         self._ensure_connected()
         self.controller.move_by(dx, dy)
         self._start_idle_timer()
+        self._update_camera_position()
 
     def move_gantry_clamped(self, dx: float, dy: float) -> None:
         """Move by relative amount, clamped to workspace bounds."""
@@ -618,6 +619,7 @@ class App(tk.Tk):
         new_x, new_y = self._clamp_position(cx + dx, cy + dy)
         self.controller.move_to(new_x, new_y)
         self._start_idle_timer()
+        self._update_camera_position()
         self.add_controls()
 
     def move_gantry_to(self, x: float, y: float) -> None:
@@ -626,6 +628,7 @@ class App(tk.Tk):
         self._ensure_connected()
         self.controller.move_to(x, y)
         self._start_idle_timer()
+        self._update_camera_position()
         self.add_controls()
 
     def move_gantry_to_clamped(self, x: float, y: float) -> None:
@@ -635,7 +638,19 @@ class App(tk.Tk):
         cx, cy = self._clamp_position(x, y)
         self.controller.move_to(cx, cy)
         self._start_idle_timer()
+        self._update_camera_position()
         self.add_controls()
+
+    def _update_camera_position(self) -> None:
+        """Sync camera simulator position from controller after movement."""
+        from mvp.camera_simulator import CameraSimulator
+        if isinstance(self.camera, CameraSimulator):
+            try:
+                pos = self.controller.position
+                self.camera.simulator.camera_x_mm = pos[0]
+                self.camera.simulator.camera_y_mm = pos[1]
+            except:
+                pass
 
     # ------------------------------------------------------------------
     # Controller connection management
@@ -1557,9 +1572,11 @@ class App(tk.Tk):
                 )
 
         elif self.state == "CONFIRM_M1":
-            # AICODE-NOTE: Same as CONFIRM_M2 - no auto-detection.
-            # User fine-tunes position manually with arrow keys.
-            pass
+            # Sync camera position from controller for display while user adjusts
+            if isinstance(self.camera, CameraSimulator):
+                ctrl_x, ctrl_y = self._read_position()
+                self.camera.simulator.camera_x_mm = ctrl_x
+                self.camera.simulator.camera_y_mm = ctrl_y
 
         elif self.state == "SEARCH_M2":
             # AICODE-NOTE: sync simulator with controller before detection
@@ -1608,9 +1625,11 @@ class App(tk.Tk):
                 self.add_controls()
 
         elif self.state == "CONFIRM_M2":
-            # AICODE-NOTE: No auto-detection. User has confirmed M2 was found
-            # and is now fine-tuning the position manually.
-            pass
+            # Sync camera position from controller for display while user adjusts
+            if isinstance(self.camera, CameraSimulator):
+                ctrl_x, ctrl_y = self._read_position()
+                self.camera.simulator.camera_x_mm = ctrl_x
+                self.camera.simulator.camera_y_mm = ctrl_y
 
         # Draw confirm-state overlays (zoom + crosshair + direction arrow)
         if self.state in ("CONFIRM_M1", "CONFIRM_M2") and self.detected_marker:
