@@ -205,9 +205,13 @@ class App(tk.Tk):
         self.control_panel = tk.Frame(self)
         self.control_panel.pack()
 
-        # Status label (always visible)
-        self.status_label = tk.Label(self, text=f"State: {self.state}")
+        # Status label (always visible) - shows state + position
+        self.status_label = tk.Label(self, text=f"State: {self.state}", font=("", 14))
         self.status_label.pack()
+
+        # Position label (always visible)
+        self.position_label = tk.Label(self, text="Position: --", font=("", 12))
+        self.position_label.pack()
 
         # Controller status label
         self._controller_status = "unknown"
@@ -218,12 +222,14 @@ class App(tk.Tk):
 
         self._try_detect_controller()
 
-        # Log label — shows recent actions
-        self.log_var = tk.StringVar(value="Ready")
-        self.log_label = tk.Label(
-            self, textvariable=self.log_var, justify=tk.LEFT, anchor=tk.W
-        )
-        self.log_label.pack(fill=tk.X, padx=10, pady=5)
+        # Detailed log (scrollable text area)
+        log_frame = tk.Frame(self)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.log_text = tk.Text(log_frame, height=8, width=60, font=("", 9))
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        log_scroll = tk.Scrollbar(log_frame, command=self.log_text.yview)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.config(yscrollcommand=log_scroll.set)
 
         # ── Menu bar ──────────────────────────────────────────────
         menubar = tk.Menu(self)
@@ -322,10 +328,18 @@ class App(tk.Tk):
         self.add_controls()
 
     def _log(self, message):
-        """Append a message to the visible log."""
-        self.log_var.set(message)
-        if hasattr(self, "update_idletasks"):
-            self.update_idletasks()
+        """Append a message to the detailed log (text area)."""
+        self.log_text.insert(tk.END, message + "\n")
+        self.log_text.see(tk.END)  # Auto-scroll to bottom
+    
+    def _update_status_display(self):
+        """Update the status and position display on screen."""
+        self.status_label.config(text=f"State: {self.state}")
+        try:
+            pos = self.controller.position
+            self.position_label.config(text=f"Position: ({pos[0]:.1f}, {pos[1]:.1f}) mm")
+        except:
+            self.position_label.config(text="Position: --")
 
     # ------------------------------------------------------------------
     # Workspace bounds
@@ -382,6 +396,12 @@ class App(tk.Tk):
 
     def add_controls(self):
         self.status_label.config(text=f"State: {self.state}")
+        # Update position display
+        try:
+            pos = self.controller.position
+            self.position_label.config(text=f"Position: ({pos[0]:.1f}, {pos[1]:.1f}) mm")
+        except:
+            self.position_label.config(text="Position: --")
 
         if hasattr(self.control_panel, "winfo_children"):
             for child in self.control_panel.winfo_children():

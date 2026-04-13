@@ -111,53 +111,64 @@ Before each movement command:
 
 ## 4. State Machine
 
+The application follows this state machine:
+
 ```
-                         ┌──────────────┐
-                         │    START     │  ← Initial state, controller disconnected
-                         └──────┬───────┘
-                                │ operator clicks "Connect & Start"
-                                ▼
-                         ┌──────────────┐
-               ┌────────│  SEARCH_M1   │  ← Find M1 marker in camera FOV
-               │        └──────┬───────┘
-               │               │ marker detected → camera auto-centers
-               │               ▼
-               │        ┌──────────────┐
-               │        │  CONFIRM_M1  │  ← Zoomed view, green circle overlay
-               │        │              │     Operator fine-tunes with arrow keys
-               │        └──────┬───────┘
-               │               │ confirmed
-               │               ▼
-               │        ┌──────────────┐
-               │        │  REGISTER_M1 │  ← Move laser to M1 center
-               │        │              │     Send Alt+1 to LightBurn
-               │        └──────┬───────┘
-               │               │ registered
-               │               ▼
-               │        ┌──────────────┐
-               │        │  SEARCH_M2   │  ← Navigate toward M2 using direction
-               │        │              │     Camera auto-centers when M2 found
-               │        └──────┬───────┘
-               │               │ M2 detected → camera auto-centers
-               │               ▼
-               │        ┌──────────────┐
-               │        │  CONFIRM_M2  │  ← Zoomed view, green circle overlay
-               │        │              │     Operator fine-tunes with arrow keys
-               │        └──────┬───────┘
-               │               │ confirmed
-               │               ▼
-               │        ┌──────────────┐
-               │        │  REGISTER_M2 │  ← Move laser to M2 center
-               │        │              │     Send Alt+2 to LightBurn
-               │        └──────┬───────┘
-               │               │ registered
-               │               ▼
-               │        ┌──────────────┐
-               │        │    DONE       │  ← Both markers registered
-               │        └──────┬───────┘
-               │               │ auto-reset
-               └───────────────┘
+┌──────────────┐
+│    START     │  ← Initial state: read controller coordinates, show position
+└──────┬───────┘
+       │ operator clicks "Connect & Start"
+       ▼
+┌──────────────┐
+│  SEARCH_M1   │  ← Manual movement: user moves camera toward M1
+└──────┬───────┘
+       │ M1 enters FOV
+       ▼
+┌──────────────┐
+│  CONFIRM_M1  │  ← Auto-center on M1, zoomed view, green circle
+│              │     User adjusts position manually
+└──────┬───────┘
+       │ confirmed
+       ▼
+┌──────────────┐
+│  REGISTER_M1 │  ← Laser moves to M1 center
+│              │     User clicks "Next" when ready in LightBurn
+└──────┬───────┘
+       │ Next clicked
+       ▼
+┌──────────────┐
+│  SEARCH_M2   │  ← Navigate toward M2 (auto-move by FOV/2)
+└──────┬───────┘
+       │ M2 enters FOV
+       ▼
+┌──────────────┐
+│  CONFIRM_M2  │  ← Auto-center on M2, zoomed view, green circle
+│              │     User adjusts position manually
+└──────┬───────┘
+       │ confirmed
+       ▼
+┌──────────────┐
+│  REGISTER_M2 │  ← Laser moves to M2 center
+│              │     User clicks "Finish"
+└──────┬───────┘
+       │ Finish clicked
+       ▼
+┌──────────────┐
+│    DONE      │  ← Return to START
+└──────────────┘
 ```
+
+### Screen Output vs Log
+
+**On Screen (always visible):**
+- State name (e.g., "SEARCH_M1", "REGISTER_M1")
+- Current controller position (X, Y) in mm
+
+**In Log Area (scrollable text):**
+- All controller operations
+- Marker detections
+- Connection/disconnection events
+- User actions
 
 ---
 
